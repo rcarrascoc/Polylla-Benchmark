@@ -1,0 +1,6 @@
+[submodule "submodules/GPolylla"]
+	path = submodules/GPolylla
+	url = https://github.com/ssalinasfe/GPolylla.git
+[submodule "submodules/MPolylla"]
+	path = submodules/MPolylla
+	url = https://github.com/rcarrascoc/MPolylla.git

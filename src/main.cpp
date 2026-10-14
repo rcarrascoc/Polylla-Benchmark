@@ -1,0 +1,181 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <chrono>
+#include <cstdlib>
+#include <unistd.h>
+#include <getopt.h>
+#include <sys/stat.h>
+
+#include "src/common/benchmark_types.hpp"
+#include "src/generators/mesh_generator.hpp"
+#include "src/runners/gpu_runner.hpp"
+#include "src/runners/cpu_runner.hpp"
+
+void print_help(const char* prog_name) {
+    std::cout << "\n========================================================================\n"
+              << "       PPolylla: Parallel Polylla Benchmark (GPolylla vs MPolylla)      \n"
+              << "========================================================================\n"
+              << "Usage: " << prog_name << " [options]\n\n"
+              << "Options:\n"
+              << "  -t, --type <grid|uniform>    Mesh distribution type (default: uniform)\n"
+              << "  -s, --size <N>               Target number of vertices (default: 100000)\n"
+              << "  -r, --seed <SEED>            Random seed for reproducibility (default: 42)\n"
+              << "  -j, --threads <T>            OpenMP threads for CPU (default: 0 = all cores)\n"
+              << "  -o, --output <FILE>          Path to save comparison JSON (default: results/...)\n"
+              << "  -f, --off <FILE>             Run benchmark on an existing .off file\n"
+              << "  --save-mesh <FILE>           Save the generated mesh to a persistent .off file\n"
+              << "  -h, --help                   Show this help message\n\n"
+              << "Examples:\n"
+              << "  # Run uniform mesh with 100k vertices and seed 42:\n"
+              << "  " << prog_name << " --type uniform --size 100000 --seed 42\n\n"
+              << "  # Run grid mesh with 1 million points:\n"
+              << "  " << prog_name << " --type grid --size 1000000\n\n"
+              << "  # Run benchmark on custom OFF file using 16 CPU threads:\n"
+              << "  " << prog_name << " --off submodules/MPolylla/examples/pikachu.off --threads 16\n"
+              << "========================================================================\n\n";
+}
+
+int main(int argc, char* argv[]) {
+    std::string mesh_type = "uniform";
+    int requested_size = 100000;
+    uint64_t seed = 42;
+    int cpu_threads = 0;
+    std::string output_json = "";
+    std::string input_off = "";
+    std::string save_mesh_path = "";
+
+    static struct option long_options[] = {
+        {"type",      required_argument, 0, 't'},
+        {"size",      required_argument, 0, 's'},
+        {"seed",      required_argument, 0, 'r'},
+        {"threads",   required_argument, 0, 'j'},
+        {"output",    required_argument, 0, 'o'},
+        {"off",       required_argument, 0, 'f'},
+        {"save-mesh", required_argument, 0, 1001},
+        {"help",      no_argument,       0, 'h'},
+        {0, 0, 0, 0}
+    };
+
+    int opt;
+    int option_index = 0;
+    while ((opt = getopt_long(argc, argv, "t:s:r:j:o:f:h", long_options, &option_index)) != -1) {
+        switch (opt) {
+            case 't': mesh_type = optarg; break;
+            case 's': requested_size = std::atoi(optarg); break;
+            case 'r': seed = std::strtoull(optarg, nullptr, 10); break;
+            case 'j': cpu_threads = std::atoi(optarg); break;
+            case 'o': output_json = optarg; break;
+            case 'f': input_off = optarg; break;
+            case 1001: save_mesh_path = optarg; break;
+            case 'h':
+            default:
+                print_help(argv[0]);
+                return 0;
+        }
+    }
+
+    // Ensure results directory exists
+    struct stat st = {0};
+    if (stat("results", &st) == -1) {
+        mkdir("results", 0775);
+    }
+
+    BenchmarkComparison comp;
+    comp.mesh_type = mesh_type;
+    comp.requested_size = requested_size;
+    comp.seed = seed;
+    comp.cpu_threads = (cpu_threads > 0) ? cpu_threads : sysconf(_SC_NPROCESSORS_ONLN);
+
+    std::string test_off_file;
+    bool is_temp_file = false;
+
+    if (!input_off.empty()) {
+        test_off_file = input_off;
+        comp.mesh_type = "file (" + input_off + ")";
+        std::cout << "[Benchmark] Using provided input mesh file: " << test_off_file << std::endl;
+    } else {
+        std::cout << "\n========================================================================\n"
+                  << "  GENERATING INPUT DATASET IN MEMORY (" << mesh_type << ", size=" << requested_size << ", seed=" << seed << ")\n"
+                  << "========================================================================\n";
+
+        MemoryMesh mesh;
+        if (mesh_type == "grid") {
+            mesh = MeshGenerator::generate_grid(requested_size);
+        } else if (mesh_type == "uniform") {
+            mesh = MeshGenerator::generate_uniform(requested_size, seed);
+        } else {
+            std::cerr << "Error: Unknown mesh type '" << mesh_type << "'. Use 'grid' or 'uniform'." << std::endl;
+            return 1;
+        }
+
+        comp.mesh_gen_time_ms = mesh.gen_time_ms;
+        std::cout << "[MeshGen] Generated " << mesh.n_vertices << " vertices and " 
+                  << mesh.n_faces << " triangles in " << mesh.gen_time_ms << " ms\n";
+
+        // Determine temporary path in RAM (/dev/shm)
+        std::string shm_dir = "/dev/shm";
+        if (access(shm_dir.c_str(), W_OK) != 0) {
+            shm_dir = "/tmp";
+        }
+        test_off_file = shm_dir + "/ppolylla_mesh_" + std::to_string(getpid()) + ".off";
+        is_temp_file = true;
+
+        auto t_write_0 = std::chrono::high_resolution_clock::now();
+        if (!mesh.write_off_file(test_off_file)) {
+            std::cerr << "Error: Failed to write in-memory mesh to " << test_off_file << std::endl;
+            return 1;
+        }
+        auto t_write_1 = std::chrono::high_resolution_clock::now();
+        comp.off_write_time_ms = std::chrono::duration<double, std::milli>(t_write_1 - t_write_0).count();
+        std::cout << "[MeshGen] In-memory mesh written to RAM buffer (" << test_off_file 
+                  << ") in " << comp.off_write_time_ms << " ms\n";
+
+        if (!save_mesh_path.empty()) {
+            mesh.write_off_file(save_mesh_path);
+            std::cout << "[MeshGen] Persistent mesh saved to: " << save_mesh_path << "\n";
+        }
+    }
+
+    std::string tmp_gpu_json = "/dev/shm/gpu_stats_" + std::to_string(getpid()) + ".json";
+    std::string tmp_cpu_json = "/dev/shm/cpu_stats_" + std::to_string(getpid()) + ".json";
+
+    std::cout << "\n------------------------------------------------------------------------\n"
+              << "  [1/2] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla)\n"
+              << "------------------------------------------------------------------------\n";
+    bool gpu_ok = run_gpolylla_from_off(test_off_file.c_str(), tmp_gpu_json.c_str(), &comp.gpu_stats);
+    if (!gpu_ok) {
+        std::cerr << "Warning: GPU benchmark failed! Message: " << comp.gpu_stats.error_message << std::endl;
+    }
+
+    std::cout << "\n------------------------------------------------------------------------\n"
+              << "  [2/2] RUNNING CPU BENCHMARK (rcarrascoc/MPolylla - OpenMP)\n"
+              << "------------------------------------------------------------------------\n";
+    bool cpu_ok = run_mpolylla_from_off(test_off_file.c_str(), tmp_cpu_json.c_str(), cpu_threads, &comp.cpu_stats);
+    if (!cpu_ok) {
+        std::cerr << "Warning: CPU benchmark failed! Message: " << comp.cpu_stats.error_message << std::endl;
+    }
+
+    // Clean up temporary files
+    if (is_temp_file) {
+        std::remove(test_off_file.c_str());
+    }
+    std::remove(tmp_gpu_json.c_str());
+    std::remove(tmp_cpu_json.c_str());
+
+    // Calculate comparison & speedups
+    comp.compute_comparison();
+
+    // Print full comparison table
+    comp.print_table(std::cout);
+
+    // Save JSON output
+    if (output_json.empty()) {
+        std::string safe_type = (mesh_type == "grid" || mesh_type == "uniform") ? mesh_type : "custom";
+        output_json = "results/benchmark_" + safe_type + "_" + std::to_string(comp.requested_size) + 
+                      "_seed" + std::to_string(comp.seed) + ".json";
+    }
+    comp.save_json(output_json);
+
+    return (gpu_ok && cpu_ok) ? 0 : 1;
+}
