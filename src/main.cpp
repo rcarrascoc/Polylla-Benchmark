@@ -92,6 +92,13 @@ int main(int argc, char* argv[]) {
     comp.seed = seed;
     comp.cpu_threads = (cpu_threads > 0) ? cpu_threads : sysconf(_SC_NPROCESSORS_ONLN);
 
+    std::string full_cmd_line = "";
+    for (int i = 0; i < argc; i++) {
+        full_cmd_line += argv[i];
+        if (i < argc - 1) full_cmd_line += " ";
+    }
+    comp.meta.detect(full_cmd_line);
+
     std::string test_off_file;
     bool is_temp_file = false;
 
@@ -193,13 +200,25 @@ int main(int argc, char* argv[]) {
     // Print full comparison table
     comp.print_table(std::cout);
 
-    // Save JSON output
-    if (output_json.empty()) {
+    // Save JSON and TXT reports
+    std::string base_path = output_json;
+    if (base_path.empty()) {
         std::string safe_type = (mesh_type == "grid" || mesh_type == "uniform") ? mesh_type : "custom";
-        output_json = "results/benchmark_" + safe_type + "_" + std::to_string(comp.requested_size) + 
-                      "_seed" + std::to_string(comp.seed) + ".json";
+        base_path = "results/benchmark_" + safe_type + "_" + std::to_string(comp.requested_size) + 
+                    "_seed" + std::to_string(comp.seed);
+    } else {
+        if (base_path.size() >= 5 && base_path.substr(base_path.size() - 5) == ".json") {
+            base_path = base_path.substr(0, base_path.size() - 5);
+        } else if (base_path.size() >= 4 && base_path.substr(base_path.size() - 4) == ".txt") {
+            base_path = base_path.substr(0, base_path.size() - 4);
+        }
     }
-    comp.save_json(output_json);
+
+    std::string json_file = base_path + ".json";
+    std::string txt_file = base_path + ".txt";
+
+    comp.save_json(json_file);
+    comp.save_txt(txt_file);
 
     return (cpu_ok && gpu_ok) ? 0 : 1;
 }

@@ -8,6 +8,70 @@
 #include <iomanip>
 #include <map>
 #include <cstdint>
+#include <ctime>
+#include <sys/utsname.h>
+#include <unistd.h>
+
+inline std::string exec_cmd_safe(const char* cmd) {
+    char buffer[256];
+    std::string result = "";
+    FILE* pipe = popen(cmd, "r");
+    if (!pipe) return "N/A";
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        result += buffer;
+    }
+    pclose(pipe);
+    while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' ')) {
+        result.pop_back();
+    }
+    return result.empty() ? "N/A" : result;
+}
+
+struct SystemMetadata {
+    std::string timestamp;
+    std::string command_line;
+    std::string hostname;
+    std::string os_info;
+    std::string cpu_model;
+    int cpu_cores = 0;
+    std::string gpu_info;
+    std::string cuda_version;
+    std::string commit_main;
+    std::string commit_gpolylla;
+    std::string commit_mpolylla;
+    std::string commit_seq;
+
+    void detect(const std::string& cmd_line = "") {
+        command_line = cmd_line;
+
+        // Timestamp
+        std::time_t now = std::time(nullptr);
+        char time_buf[64];
+        std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S %Z", std::localtime(&now));
+        timestamp = time_buf;
+
+        // OS and Host
+        utsname u;
+        if (uname(&u) == 0) {
+            hostname = u.nodename;
+            os_info = std::string(u.sysname) + " " + u.release + " (" + u.machine + ")";
+        }
+
+        // CPU
+        cpu_cores = sysconf(_SC_NPROCESSORS_ONLN);
+        cpu_model = exec_cmd_safe("lscpu | grep 'Model name:' | sed 's/Model name:[ \t]*//'");
+
+        // GPU
+        gpu_info = exec_cmd_safe("nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader");
+        cuda_version = exec_cmd_safe("nvcc --version | grep 'release' | sed 's/.*release //;s/,.*//'");
+
+        // Git commits
+        commit_main = exec_cmd_safe("git rev-parse HEAD");
+        commit_gpolylla = exec_cmd_safe("git -C submodules/GPolylla rev-parse HEAD");
+        commit_mpolylla = exec_cmd_safe("git -C submodules/MPolylla rev-parse HEAD");
+        commit_seq = exec_cmd_safe("git -C submodules/Polylla-Mesh-DCEL rev-parse HEAD");
+    }
+};
 
 struct PolyllaStats {
     std::string backend; // "Sequential", "CPU", "GPU"
@@ -104,7 +168,6 @@ struct PolyllaStats {
                 else if (key == "n_polygons_added_after_repair") n_polygons_added_after_repair = std::stoi(val);
                 else if (key == "time_triangulation_generation") time_triangulation_generation = std::stod(val);
                 else if (key == "d_time_copy_to_device") d_time_copy_to_device = std::stod(val);
-                // Handle both with and without d_ prefix
                 else if (key == "d_time_to_label_max_edges" || key == "time_to_label_max_edges") d_time_to_label_max_edges = std::stod(val);
                 else if (key == "d_time_to_label_frontier_edges" || key == "time_to_label_frontier_edges") d_time_to_label_frontier_edges = std::stod(val);
                 else if (key == "d_time_to_label_seed_edges" || key == "time_to_label_seed_edges") d_time_to_label_seed_edges = std::stod(val);
@@ -145,9 +208,11 @@ struct BenchmarkComparison {
     PolyllaStats cpu_stats;
     PolyllaStats gpu_stats;
 
-    double speedup_gpu_vs_seq = 0.0;         // Seq time / GPU time
-    double speedup_omp_vs_seq = 0.0;         // Seq time / OMP time
-    double speedup_gpu_vs_omp = 0.0;         // OMP time / GPU time
+    SystemMetadata meta;
+
+    double speedup_gpu_vs_seq = 0.0;             // Seq time / GPU time
+    double speedup_omp_vs_seq = 0.0;             // Seq time / OMP time
+    double speedup_gpu_vs_omp = 0.0;             // OMP time / GPU time
     double speedup_gpu_with_copies_vs_seq = 0.0; // Seq time / (GPU time + copies)
 
     void compute_comparison() {
@@ -242,6 +307,66 @@ struct BenchmarkComparison {
         os << "===================================================================================================================\n\n";
     }
 
+    void save_txt(const std::string& filepath) const {
+        std::ofstream out(filepath);
+        if (!out.is_open()) {
+            std::cerr << "Warning: Could not save TXT report to " << filepath << std::endl;
+            return;
+        }
+
+        out << "===================================================================================================================\n"
+            << "                                     POLYLLA BENCHMARK EXECUTION REPORT\n"
+            << "===================================================================================================================\n\n"
+            << "[1] EXECUTION METADATA\n"
+            << "-------------------------------------------------------------------------------------------------------------------\n"
+            << "  Timestamp:            " << meta.timestamp << "\n"
+            << "  Invocation Command:   " << meta.command_line << "\n"
+            << "  Hostname:             " << meta.hostname << "\n"
+            << "  OS / Kernel:          " << meta.os_info << "\n"
+            << "  CPU Model:            " << meta.cpu_model << " (" << meta.cpu_cores << " logical threads)\n"
+            << "  GPU Hardware:         " << meta.gpu_info << "\n"
+            << "  CUDA Version:         " << meta.cuda_version << "\n\n"
+            << "[2] SUBMODULE VERSIONS & COMMITS\n"
+            << "-------------------------------------------------------------------------------------------------------------------\n"
+            << "  Project (PPolylla):    " << meta.commit_main << "\n"
+            << "  Baseline (Sequential): https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git\n"
+            << "                         Commit: " << meta.commit_seq << "\n"
+            << "  OpenMP (MPolylla):     https://github.com/rcarrascoc/MPolylla.git\n"
+            << "                         Commit: " << meta.commit_mpolylla << "\n"
+            << "  GPU (GPolylla):        https://github.com/ssalinasfe/GPolylla.git\n"
+            << "                         Commit: " << meta.commit_gpolylla << "\n\n"
+            << "[3] EXPERIMENT PARAMETERS\n"
+            << "-------------------------------------------------------------------------------------------------------------------\n"
+            << "  Mesh Type:            " << mesh_type << "\n"
+            << "  Requested Vertices:   " << requested_size << "\n"
+            << "  Random Seed:          " << seed << "\n"
+            << "  CPU OpenMP Threads:   " << cpu_threads << "\n"
+            << "  Mesh Gen Time (RAM):  " << std::fixed << std::setprecision(3) << mesh_gen_time_ms << " ms\n"
+            << "  RAM Buffer Write:     " << std::fixed << std::setprecision(3) << off_write_time_ms << " ms\n\n";
+
+        // Call print_table on out stream
+        print_table(out);
+
+        out << "[4] DETAILED MEMORY FOOTPRINT\n"
+            << "-------------------------------------------------------------------------------------------------------------------\n"
+            << "  GPU VRAM Usage (cudaMemGetInfo):  " << gpu_stats.memory_total_gpu << " bytes ("
+            << std::fixed << std::setprecision(2) << (gpu_stats.memory_total_gpu / (1024.0 * 1024.0)) << " MB)\n"
+            << "  GPU Data Structures Estimated:    " << gpu_stats.memory_total << " bytes ("
+            << std::fixed << std::setprecision(2) << (gpu_stats.memory_total / (1024.0 * 1024.0)) << " MB)\n"
+            << "  Sequential CPU Memory Estimated:  " << seq_stats.memory_total << " bytes ("
+            << std::fixed << std::setprecision(2) << (seq_stats.memory_total / (1024.0 * 1024.0)) << " MB)\n\n"
+            << "[5] REPRODUCIBILITY INSTRUCTIONS\n"
+            << "-------------------------------------------------------------------------------------------------------------------\n"
+            << "  To reproduce this exact experiment with the same input mesh, execute:\n"
+            << "  ./run_benchmark.sh --type " << mesh_type << " --size " << requested_size << " --seed " << seed;
+        if (cpu_threads > 0) out << " --threads " << cpu_threads;
+        out << "\n"
+            << "===================================================================================================================\n";
+
+        out.close();
+        std::cout << "[Report] Saved TXT benchmark report to:  " << filepath << std::endl;
+    }
+
     void save_json(const std::string& filepath) const {
         std::ofstream out(filepath);
         if (!out.is_open()) {
@@ -249,6 +374,20 @@ struct BenchmarkComparison {
             return;
         }
         out << "{\n"
+            << "  \"metadata\": {\n"
+            << "    \"timestamp\": \"" << meta.timestamp << "\",\n"
+            << "    \"command_line\": \"" << meta.command_line << "\",\n"
+            << "    \"hostname\": \"" << meta.hostname << "\",\n"
+            << "    \"os_info\": \"" << meta.os_info << "\",\n"
+            << "    \"cpu_model\": \"" << meta.cpu_model << "\",\n"
+            << "    \"cpu_cores\": " << meta.cpu_cores << ",\n"
+            << "    \"gpu_info\": \"" << meta.gpu_info << "\",\n"
+            << "    \"cuda_version\": \"" << meta.cuda_version << "\",\n"
+            << "    \"commit_main\": \"" << meta.commit_main << "\",\n"
+            << "    \"commit_gpolylla\": \"" << meta.commit_gpolylla << "\",\n"
+            << "    \"commit_mpolylla\": \"" << meta.commit_mpolylla << "\",\n"
+            << "    \"commit_seq\": \"" << meta.commit_seq << "\"\n"
+            << "  },\n"
             << "  \"mesh_type\": \"" << mesh_type << "\",\n"
             << "  \"requested_size\": " << requested_size << ",\n"
             << "  \"seed\": " << seed << ",\n"
