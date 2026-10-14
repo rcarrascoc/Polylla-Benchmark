@@ -12,6 +12,7 @@
 #include "src/runners/seq_runner.hpp"
 #include "src/runners/gpu_runner.hpp"
 #include "src/runners/cpu_runner.hpp"
+#include "src/runners/cpu_task_runner.hpp"
 
 void print_help(const char* prog_name) {
     std::cout << "\n========================================================================================\n"
@@ -151,12 +152,13 @@ int main(int argc, char* argv[]) {
 
     std::string tmp_seq_json = "/dev/shm/seq_stats_" + std::to_string(getpid()) + ".json";
     std::string tmp_cpu_json = "/dev/shm/cpu_stats_" + std::to_string(getpid()) + ".json";
+    std::string tmp_task_json = "/dev/shm/task_stats_" + std::to_string(getpid()) + ".json";
     std::string tmp_gpu_json = "/dev/shm/gpu_stats_" + std::to_string(getpid()) + ".json";
 
     // 1. Sequential Baseline
     if (run_sequential) {
         std::cout << "\n------------------------------------------------------------------------\n"
-                  << "  [1/3] RUNNING SEQUENTIAL BASELINE (ssalinasfe/Polylla-Mesh-DCEL)\n"
+                  << "  [1/4] RUNNING SEQUENTIAL BASELINE (ssalinasfe/Polylla-Mesh-DCEL)\n"
                   << "------------------------------------------------------------------------\n";
         bool seq_ok = run_seq_polylla_from_off(test_off_file.c_str(), tmp_seq_json.c_str(), &comp.seq_stats);
         comp.has_seq = seq_ok;
@@ -168,18 +170,28 @@ int main(int argc, char* argv[]) {
         comp.has_seq = false;
     }
 
-    // 2. OpenMP CPU
+    // 2. OpenMP CPU (Loops - main branch)
     std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [2/3] RUNNING CPU MULTI-CORE BENCHMARK (rcarrascoc/MPolylla - OpenMP)\n"
+              << "  [2/4] RUNNING CPU MULTI-CORE LOOPS (rcarrascoc/MPolylla - main)\n"
               << "------------------------------------------------------------------------\n";
     bool cpu_ok = run_mpolylla_from_off(test_off_file.c_str(), tmp_cpu_json.c_str(), cpu_threads, &comp.cpu_stats);
     if (!cpu_ok) {
-        std::cerr << "Warning: CPU benchmark failed! Message: " << comp.cpu_stats.error_message << std::endl;
+        std::cerr << "Warning: CPU Loops benchmark failed! Message: " << comp.cpu_stats.error_message << std::endl;
     }
 
-    // 3. GPU CUDA
+    // 3. OpenMP CPU (Tasks - Task branch)
     std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [3/3] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla - CUDA)\n"
+              << "  [3/4] RUNNING CPU MULTI-CORE TASKS (rcarrascoc/MPolylla - Task)\n"
+              << "------------------------------------------------------------------------\n";
+    bool task_ok = run_mpolylla_task_from_off(test_off_file.c_str(), tmp_task_json.c_str(), cpu_threads, &comp.task_stats);
+    comp.has_task = task_ok;
+    if (!task_ok) {
+        std::cerr << "Warning: CPU Tasks benchmark failed! Message: " << comp.task_stats.error_message << std::endl;
+    }
+
+    // 4. GPU CUDA
+    std::cout << "\n------------------------------------------------------------------------\n"
+              << "  [4/4] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla - CUDA)\n"
               << "------------------------------------------------------------------------\n";
     bool gpu_ok = run_gpolylla_from_off(test_off_file.c_str(), tmp_gpu_json.c_str(), &comp.gpu_stats);
     if (!gpu_ok) {
@@ -192,6 +204,7 @@ int main(int argc, char* argv[]) {
     }
     std::remove(tmp_seq_json.c_str());
     std::remove(tmp_cpu_json.c_str());
+    std::remove(tmp_task_json.c_str());
     std::remove(tmp_gpu_json.c_str());
 
     // Calculate comparison & speedups

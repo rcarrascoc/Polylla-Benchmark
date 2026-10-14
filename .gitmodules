@@ -7,3 +7,7 @@
 [submodule "submodules/Polylla-Mesh-DCEL"]
 	path = submodules/Polylla-Mesh-DCEL
 	url = https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git
+[submodule "submodules/MPolylla-Task"]
+	path = submodules/MPolylla-Task
+	url = https://github.com/rcarrascoc/MPolylla.git
+	branch = Task

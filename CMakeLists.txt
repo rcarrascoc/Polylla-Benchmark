@@ -19,10 +19,6 @@ find_package(OpenMP REQUIRED)
 # Common include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/Polylla-Mesh-DCEL/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/GPolylla/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/GPolylla/external
-    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/MPolylla/src
 )
 
 # 1. Build malloccountfiles static library with position independent code
@@ -36,6 +32,9 @@ set_target_properties(malloccountfiles PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(seq_runner SHARED
     src/runners/seq_runner.cpp
 )
+target_include_directories(seq_runner PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/Polylla-Mesh-DCEL/src
+)
 set_target_properties(seq_runner PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden
@@ -45,6 +44,10 @@ set_target_properties(seq_runner PROPERTIES
 # 3. Build GPU runner shared library (ssalinasfe/GPolylla - CUDA)
 add_library(gpolylla_runner SHARED
     src/runners/gpu_runner.cu
+)
+target_include_directories(gpolylla_runner PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/GPolylla/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/GPolylla/external
 )
 set_target_properties(gpolylla_runner PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -57,9 +60,12 @@ target_link_libraries(gpolylla_runner PRIVATE
     pthread
 )
 
-# 4. Build CPU runner shared library (rcarrascoc/MPolylla - OpenMP)
+# 4. Build CPU runner shared library (rcarrascoc/MPolylla - OpenMP Loops)
 add_library(mpolylla_runner SHARED
     src/runners/cpu_runner.cpp
+)
+target_include_directories(mpolylla_runner PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/MPolylla/src
 )
 set_target_properties(mpolylla_runner PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -70,13 +76,30 @@ target_link_libraries(mpolylla_runner PRIVATE
     OpenMP::OpenMP_CXX
 )
 
-# 5. Build main benchmark executable
+# 5. Build CPU Task runner shared library (rcarrascoc/MPolylla - OpenMP Tasks branch)
+add_library(mpolylla_task_runner SHARED
+    src/runners/cpu_task_runner.cpp
+)
+target_include_directories(mpolylla_task_runner PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/MPolylla-Task/src
+)
+set_target_properties(mpolylla_task_runner PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
+target_link_libraries(mpolylla_task_runner PRIVATE
+    OpenMP::OpenMP_CXX
+)
+
+# 6. Build main benchmark executable
 add_executable(ppolylla_benchmark
     src/main.cpp
 )
 target_link_libraries(ppolylla_benchmark PRIVATE
     seq_runner
     mpolylla_runner
+    mpolylla_task_runner
     gpolylla_runner
 )
 
