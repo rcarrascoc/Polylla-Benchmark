@@ -1,16 +1,21 @@
 # PPolylla: Benchmark Comparativo de Algoritmos Paralelos de Polylla
 
-Suite de benchmark y análisis de rendimiento para comparar las implementaciones paralelas del algoritmo **Polylla**:
-1. **GPU (CUDA)**: [ssalinasfe/GPolylla](https://github.com/ssalinasfe/GPolylla.git)
+Suite de benchmark y análisis de rendimiento para comparar tres implementaciones del algoritmo **Polylla**:
+1. **CPU Secuencial (Baseline)**: [ssalinasfe/Polylla-Mesh-DCEL](https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git)
 2. **CPU Multi-core (OpenMP)**: [rcarrascoc/MPolylla](https://github.com/rcarrascoc/MPolylla.git)
+3. **GPU (CUDA)**: [ssalinasfe/GPolylla](https://github.com/ssalinasfe/GPolylla.git)
 
-El sistema genera los datasets de prueba (mallas de triángulos) **directamente en memoria (RAM)** compartida para asegurar que ambas implementaciones evalúen exactamente el mismo conjunto de vértices y caras, admitiendo una semilla (`seed`) para reproducir los experimentos al 100%.
+El sistema genera los datasets de prueba (mallas de triángulos) **directamente en memoria (RAM)** compartida para asegurar que las tres implementaciones evalúen exactamente el mismo conjunto de vértices y caras, admitiendo una semilla (`seed`) para reproducir los experimentos al 100%.
 
 ---
 
 ## 🚀 Características Principales
 
-- **Submódulos Aislados**: Los repositorios originales se integran como submódulos de Git en el directorio `submodules/` (`submodules/GPolylla` y `submodules/MPolylla`), manteniendo `src/` limpio y desacoplado.
+- **Submódulos Aislados**: Los repositorios originales se integran como submódulos de Git en el directorio `submodules/`:
+  - `submodules/Polylla-Mesh-DCEL` (Baseline secuencial)
+  - `submodules/MPolylla` (Paralelo OpenMP)
+  - `submodules/GPolylla` (Paralelo CUDA GPU)
+  Manteniendo `src/` limpio y desacoplado mediante librerías compartidas independientes (`libseq_runner.so`, `libmpolylla_runner.so`, `libgpolylla_runner.so`).
 - **Generación en Memoria (Zero Disk Overhead)**:
   - **Grilla (`grid`)**: Malla estructurada regular de $k \times k$ vértices con división diagonal idéntica a la usada en las publicaciones de GPolylla.
   - **Uniforme (`uniform`)**: Puntos distribuidos uniformemente en $[0, 1] \times [0, 1]$ con ajuste a los bordes (`move_point`) y triangulación de Delaunay en memoria en apenas milisegundos gracias a `delaunator-cpp`.
@@ -27,7 +32,9 @@ El sistema genera los datasets de prueba (mallas de triángulos) **directamente 
   9. Escaneo prefijo de semillas (`d_time_to_label_scan_edges`)
   10. Compactación de semillas (`d_time_to_label_compaction_edges`)
   - Transferencias host-device (`d_time_copy_to_device`, `d_time_to_back_to_host`)
-  - **Tiempo Total de Algoritmo** y **Speedup** (GPU vs CPU, con y sin transferencias).
+  - **Speedup GPU vs Secuencial Baseline** (con y sin transferencias)
+  - **Speedup OpenMP vs Secuencial Baseline**
+  - **Speedup GPU vs OpenMP Multi-Core**
 - **Ejecución con un solo comando**: Script `./run_benchmark.sh` y CLI `scripts/benchmark.py` con soporte para barridos (*sweeps*) automáticos, tablas CSV y generación de gráficos con Matplotlib.
 
 ---
@@ -40,8 +47,9 @@ PPolylla/
 ├── run_benchmark.sh         # Script ejecutable principal de benchmark
 ├── README.md                # Documentación del proyecto
 ├── submodules/              # Submódulos externos (repositorios remotos)
-│   ├── GPolylla/            # Implementación GPU (CUDA)
-│   └── MPolylla/            # Implementación CPU (OpenMP)
+│   ├── Polylla-Mesh-DCEL/   # Baseline secuencial en CPU
+│   ├── MPolylla/            # Implementación CPU (OpenMP)
+│   └── GPolylla/            # Implementación GPU (CUDA)
 ├── src/                     # Código fuente de la suite de benchmark
 │   ├── common/
 │   │   └── benchmark_types.hpp # Estructuras de datos, timers, reporte y serialización
@@ -49,8 +57,9 @@ PPolylla/
 │   │   ├── delaunator.hpp      # Triangulador de Delaunay 2D ultra-rápido en C++
 │   │   └── mesh_generator.hpp  # Generadores en memoria de mallas (grid y uniform)
 │   ├── runners/
-│   │   ├── gpu_runner.hpp / .cu # Envoltorio de GPolylla aislado en libgpolylla_runner.so
-│   │   └── cpu_runner.hpp / .cpp# Envoltorio de MPolylla aislado en libmpolylla_runner.so
+│   │   ├── seq_runner.hpp / .cpp# Envoltorio de Polylla-Mesh-DCEL en libseq_runner.so
+│   │   ├── cpu_runner.hpp / .cpp# Envoltorio de MPolylla en libmpolylla_runner.so
+│   │   └── gpu_runner.hpp / .cu # Envoltorio de GPolylla en libgpolylla_runner.so
 │   └── main.cpp             # Ejecutable principal C++ de benchmark
 ├── scripts/
 │   └── benchmark.py         # Orquestador Python para barridos (sweeps) y gráficos
@@ -60,106 +69,78 @@ PPolylla/
 
 ---
 
-## 🛠️ Requisitos del Sistema
-
-- **Compilador C++**: GCC / G++ 11+ con soporte para OpenMP (`-fopenmp`)
-- **CUDA Toolkit**: NVCC 12.0+ con soporte para arquitectura GPU (e.g. sm_89, sm_80)
-- **GPU NVIDIA**: Compatible con CUDA (e.g. RTX 4090, RTX 3090, A100, etc.)
-- **CMake**: Versión 3.18 o superior
-- **Python 3**: Con `pandas` y `matplotlib` para gráficos y barridos
-
----
-
-## ⚙️ Compilación
-
-El proyecto se compila automáticamente al ejecutar `./run_benchmark.sh`, o manualmente con:
-
-```bash
-mkdir -p build && cd build
-cmake -DCMAKE_CUDA_ARCHITECTURES=native ..
-make -j$(nproc)
-cd ..
-```
-
----
-
 ## 🖥️ Uso Rápido (Un Solo Comando)
 
-### 1. Benchmark Individual (Malla Uniforme con Semilla)
+### 1. Benchmark Individual Completo (Secuencial vs OpenMP vs GPU)
 
 ```bash
+# Malla uniforme de 100,000 vértices con semilla 42
 ./run_benchmark.sh --type uniform --size 100000 --seed 42
+
+# Malla de grilla de 1,000,000 puntos (omitiendo secuencial para acelerar)
+./run_benchmark.sh --type grid --size 1000000 --no-seq
 ```
 
-### 2. Benchmark Individual (Malla de Grilla Regular)
+### 2. Barrido Automático de Tamaños y Gráficos
+
+Para evaluar múltiples tamaños (ej. 10k, 50k, 100k vértices):
 
 ```bash
-./run_benchmark.sh --type grid --size 1000000
+./run_benchmark.sh --sweep --type uniform --sizes 10000,50000,100000 --seed 42
 ```
 
-### 3. Benchmark sobre un Archivo `.off` Existente
-
-```bash
-./run_benchmark.sh --off submodules/MPolylla/examples/pikachu.off --threads 16
-```
-
-### 4. Barrido Automático de Tamaños y Generación de Gráficos
-
-Para evaluar múltiples tamaños (ej. 10k, 50k, 100k, 500k, 1M de vértices):
-
-```bash
-./run_benchmark.sh --sweep --type uniform --sizes 10000,50000,100000,500000,1000000 --seed 42
-```
-
-Esto generará automáticamente:
+Salida generada:
 - Reportes individuales JSON en `results/`
 - Tabla consolidada CSV en `results/sweep_uniform_seed42.csv`
-- Gráfico de Speedup en `plots/speedup_uniform.png`
-- Gráfico de Tiempo de Ejecución en `plots/time_uniform.png`
+- Gráfico de Speedup en `plots/speedup_uniform.png` (curvas GPU vs Seq, OpenMP vs Seq, GPU vs OpenMP)
+- Gráfico de Tiempo en `plots/time_uniform.png` (curvas de los 3 códigos en escala logarítmica)
 
 ---
 
 ## 📊 Ejemplo de Salida en Terminal
 
 ```
-========================================================================================
-                         POLYLLA BENCHMARK COMPARISON REPORT                            
-========================================================================================
+===================================================================================================================
+                                 POLYLLA BENCHMARK COMPARISON REPORT                                               
+                 (Sequential Baseline vs OpenMP Multi-Core CPU vs CUDA GPU)                                       
+===================================================================================================================
   Mesh Type:       uniform
   Requested Size:  100000
   Random Seed:     42
   CPU Threads:     20
-  Mesh Gen Time:   132.327 ms
-----------------------------------------------------------------------------------------
-  Metric / Element                GPU (GPolylla)       CPU (MPolylla)       Difference  
-----------------------------------------------------------------------------------------
-  Vertices (n_vertices)                       100002              100002            MATCH
-  Faces (n_faces)                             199992              199992            MATCH
-  Half-Edges (n_half_edges)                   599986              599986            MATCH
-  Polygons (n_polygons)                        32053               32004               49
-----------------------------------------------------------------------------------------
-  Phase Timers (ms)               GPU (GPolylla)       CPU (MPolylla)          Speedup  
-----------------------------------------------------------------------------------------
-  1. Triangulation Data Struct              164.1250            164.4400            1.00x
-  2. Label Max Edges                          4.7406              6.1351            1.29x
-  3. Label Frontier Edges                     0.3997              1.2112            3.03x
-  4. Label Seed Edges                         0.0000              1.9395               -
-  5. Repair Extra Frontier                    0.0444              2.0526           46.24x
-  6. Traversal Phase 1                        0.0427              2.6418           61.87x
-  7. Traversal Phase 2 (Search)               0.0201              0.5861           29.16x
-  8. Repair Overwrite Seed                    0.0406              0.7827           19.27x
-  9. Label Seed Scan                          0.0000              0.0000               -
-  10. Seed Compaction                         0.1734              0.5034            2.90x
-----------------------------------------------------------------------------------------
-  TOTAL ALGORITHM TIME                        5.1403             15.8524            3.08x
-----------------------------------------------------------------------------------------
-  GPU Transfer To Device:                     1.7528 ms
-  GPU Transfer Back To Host:                  1.8392 ms
-  GPU TOTAL (Alg + Transfers):                8.7323 ms
-----------------------------------------------------------------------------------------
-  >>> SPEEDUP (Algorithm only):                 3.08x
-  >>> SPEEDUP (With Transfers):                 1.82x
-========================================================================================
+  Mesh Gen Time:   137.779 ms
+-------------------------------------------------------------------------------------------------------------------
+  Metric / Element             SEQ (Baseline)       CPU (MPolylla)       GPU (GPolylla)       Validation           
+-------------------------------------------------------------------------------------------------------------------
+  Vertices (n_vertices)                 100002               100002               100002          MATCH (CPU=GPU)
+  Faces (n_faces)                       199992               199992               199992          MATCH (CPU=GPU)
+  Half-Edges (n_half_edges)             599986               599986               599986          MATCH (CPU=GPU)
+  Polygons (n_polygons)                  32046                32003                32053         DIFF (CPU!=GPU)*
+-------------------------------------------------------------------------------------------------------------------
+  Phase Timers (ms)            SEQ (Baseline)       CPU (MPolylla)       GPU (GPolylla)      Speedup GPU/Seq       
+-------------------------------------------------------------------------------------------------------------------
+  1. Triangulation Struct             165.0390             156.4100             165.4390                  1.00x
+  2. Label Max Edges                   42.3635               5.7677               4.7541                  8.91x
+  3. Label Frontier Edges              14.7088               1.0968               0.3776                 38.96x
+  4. Label Seed Edges                  16.4518               1.0951               0.0000                     -
+  5. Repair Extra Frontier              2.1364               1.4482               0.0468                 45.64x
+  6. Traversal Phase 1                 16.4800               3.1899               0.0443                371.77x
+  7. Traversal Phase 2 (Search)             0.0000               1.8583               0.0191                     -
+  8. Repair Overwrite Seed              0.0000               1.4190               0.0405                     -
+  9. Label Seed Scan                    0.0000               0.0000               0.0000                     -
+  10. Seed Compaction                   0.0000               0.5099               0.1905                     -
+-------------------------------------------------------------------------------------------------------------------
+  TOTAL ALGORITHM TIME                 92.1405              16.3848               5.1317                 17.96x
+-------------------------------------------------------------------------------------------------------------------
+  GPU Transfer Host->Device:                 1.7640 ms
+  GPU Transfer Device->Host:                 2.1068 ms
+  GPU TOTAL (Alg + Transfers):               9.0025 ms
+-------------------------------------------------------------------------------------------------------------------
+  >>> SPEEDUP GPU vs Sequential (Alg only):             17.96x
+  >>> SPEEDUP GPU vs Sequential (With Transfers):       10.23x
+  >>> SPEEDUP OpenMP vs Sequential:                      5.62x
+  >>> SPEEDUP GPU vs OpenMP (Alg only):                  3.19x
+===================================================================================================================
 ```
 
 ---
@@ -174,19 +155,8 @@ Esto generará automáticamente:
 | `-j, --threads <T>` | Hilos OpenMP para CPU (0 = todos los núcleos detectados) | `0` |
 | `-o, --output <PATH>` | Ruta del archivo JSON de salida | `results/benchmark_...json` |
 | `-f, --off <FILE>` | Usar un archivo `.off` existente en lugar de generar en memoria | Ninguno |
+| `--no-seq` | Omitir el baseline secuencial en CPU | `false` (ejecuta los 3) |
 | `--save-mesh <PATH>` | Guarda la malla generada en un archivo `.off` persistente | Ninguno |
 | `--sweep` | Activa el modo barrido múltiple a través del script Python | `false` |
 | `--sizes <N1,N2,...>` | Lista separada por comas de tamaños para el barrido | `10k,50k,100k,500k,1M` |
 | `-h, --help` | Muestra el menú de ayuda | - |
-
----
-
-## 🔬 Reproducibilidad de Experimentos
-
-Para replicar un experimento en cualquier momento o máquina con la misma configuración:
-
-```bash
-# Ejemplo: reproducir exactamente con semilla 12345
-./run_benchmark.sh --type uniform --size 500000 --seed 12345
-```
-El archivo de resultados se guardará en `results/benchmark_uniform_500000_seed12345.json` con todos los timestamps, métricas de polígonos, aristas y timers.

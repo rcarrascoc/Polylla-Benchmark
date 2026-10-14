@@ -9,7 +9,6 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # Detect or configure CUDA architecture
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    # Default to modern architecture or native (RTX 4090 is sm_89, RTX 3090 is sm_86, A100 is sm_80)
     set(CMAKE_CUDA_ARCHITECTURES "native")
 endif()
 message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
@@ -20,6 +19,7 @@ find_package(OpenMP REQUIRED)
 # Common include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/Polylla-Mesh-DCEL/src
     ${CMAKE_CURRENT_SOURCE_DIR}/submodules/GPolylla/src
     ${CMAKE_CURRENT_SOURCE_DIR}/submodules/GPolylla/external
     ${CMAKE_CURRENT_SOURCE_DIR}/submodules/MPolylla/src
@@ -32,7 +32,17 @@ add_library(malloccountfiles STATIC
 )
 set_target_properties(malloccountfiles PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# 2. Build GPU runner shared library (ssalinasfe/GPolylla)
+# 2. Build Sequential runner shared library (ssalinasfe/Polylla-Mesh-DCEL - Baseline)
+add_library(seq_runner SHARED
+    src/runners/seq_runner.cpp
+)
+set_target_properties(seq_runner PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
+
+# 3. Build GPU runner shared library (ssalinasfe/GPolylla - CUDA)
 add_library(gpolylla_runner SHARED
     src/runners/gpu_runner.cu
 )
@@ -47,7 +57,7 @@ target_link_libraries(gpolylla_runner PRIVATE
     pthread
 )
 
-# 3. Build CPU runner shared library (rcarrascoc/MPolylla - OpenMP)
+# 4. Build CPU runner shared library (rcarrascoc/MPolylla - OpenMP)
 add_library(mpolylla_runner SHARED
     src/runners/cpu_runner.cpp
 )
@@ -60,13 +70,14 @@ target_link_libraries(mpolylla_runner PRIVATE
     OpenMP::OpenMP_CXX
 )
 
-# 4. Build main benchmark executable
+# 5. Build main benchmark executable
 add_executable(ppolylla_benchmark
     src/main.cpp
 )
 target_link_libraries(ppolylla_benchmark PRIVATE
-    gpolylla_runner
+    seq_runner
     mpolylla_runner
+    gpolylla_runner
 )
 
 # Set runtime path so the executable finds its runner libraries

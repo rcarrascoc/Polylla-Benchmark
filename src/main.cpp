@@ -9,13 +9,14 @@
 
 #include "src/common/benchmark_types.hpp"
 #include "src/generators/mesh_generator.hpp"
+#include "src/runners/seq_runner.hpp"
 #include "src/runners/gpu_runner.hpp"
 #include "src/runners/cpu_runner.hpp"
 
 void print_help(const char* prog_name) {
-    std::cout << "\n========================================================================\n"
-              << "       PPolylla: Parallel Polylla Benchmark (GPolylla vs MPolylla)      \n"
-              << "========================================================================\n"
+    std::cout << "\n========================================================================================\n"
+              << "       PPolylla: Parallel Polylla Benchmark (Sequential vs OpenMP vs CUDA GPU)          \n"
+              << "========================================================================================\n"
               << "Usage: " << prog_name << " [options]\n\n"
               << "Options:\n"
               << "  -t, --type <grid|uniform>    Mesh distribution type (default: uniform)\n"
@@ -24,16 +25,17 @@ void print_help(const char* prog_name) {
               << "  -j, --threads <T>            OpenMP threads for CPU (default: 0 = all cores)\n"
               << "  -o, --output <FILE>          Path to save comparison JSON (default: results/...)\n"
               << "  -f, --off <FILE>             Run benchmark on an existing .off file\n"
+              << "  --no-seq                     Skip sequential CPU baseline (useful for very large meshes)\n"
               << "  --save-mesh <FILE>           Save the generated mesh to a persistent .off file\n"
               << "  -h, --help                   Show this help message\n\n"
               << "Examples:\n"
-              << "  # Run uniform mesh with 100k vertices and seed 42:\n"
+              << "  # Run uniform mesh with 100k vertices and seed 42 (Sequential vs OpenMP vs GPU):\n"
               << "  " << prog_name << " --type uniform --size 100000 --seed 42\n\n"
-              << "  # Run grid mesh with 1 million points:\n"
-              << "  " << prog_name << " --type grid --size 1000000\n\n"
+              << "  # Run grid mesh with 500k points:\n"
+              << "  " << prog_name << " --type grid --size 500000\n\n"
               << "  # Run benchmark on custom OFF file using 16 CPU threads:\n"
               << "  " << prog_name << " --off submodules/MPolylla/examples/pikachu.off --threads 16\n"
-              << "========================================================================\n\n";
+              << "========================================================================================\n\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -44,6 +46,7 @@ int main(int argc, char* argv[]) {
     std::string output_json = "";
     std::string input_off = "";
     std::string save_mesh_path = "";
+    bool run_sequential = true;
 
     static struct option long_options[] = {
         {"type",      required_argument, 0, 't'},
@@ -52,6 +55,7 @@ int main(int argc, char* argv[]) {
         {"threads",   required_argument, 0, 'j'},
         {"output",    required_argument, 0, 'o'},
         {"off",       required_argument, 0, 'f'},
+        {"no-seq",    no_argument,       0, 1002},
         {"save-mesh", required_argument, 0, 1001},
         {"help",      no_argument,       0, 'h'},
         {0, 0, 0, 0}
@@ -68,6 +72,7 @@ int main(int argc, char* argv[]) {
             case 'o': output_json = optarg; break;
             case 'f': input_off = optarg; break;
             case 1001: save_mesh_path = optarg; break;
+            case 1002: run_sequential = false; break;
             case 'h':
             default:
                 print_help(argv[0]);
@@ -137,31 +142,50 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::string tmp_gpu_json = "/dev/shm/gpu_stats_" + std::to_string(getpid()) + ".json";
+    std::string tmp_seq_json = "/dev/shm/seq_stats_" + std::to_string(getpid()) + ".json";
     std::string tmp_cpu_json = "/dev/shm/cpu_stats_" + std::to_string(getpid()) + ".json";
+    std::string tmp_gpu_json = "/dev/shm/gpu_stats_" + std::to_string(getpid()) + ".json";
 
-    std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [1/2] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla)\n"
-              << "------------------------------------------------------------------------\n";
-    bool gpu_ok = run_gpolylla_from_off(test_off_file.c_str(), tmp_gpu_json.c_str(), &comp.gpu_stats);
-    if (!gpu_ok) {
-        std::cerr << "Warning: GPU benchmark failed! Message: " << comp.gpu_stats.error_message << std::endl;
+    // 1. Sequential Baseline
+    if (run_sequential) {
+        std::cout << "\n------------------------------------------------------------------------\n"
+                  << "  [1/3] RUNNING SEQUENTIAL BASELINE (ssalinasfe/Polylla-Mesh-DCEL)\n"
+                  << "------------------------------------------------------------------------\n";
+        bool seq_ok = run_seq_polylla_from_off(test_off_file.c_str(), tmp_seq_json.c_str(), &comp.seq_stats);
+        comp.has_seq = seq_ok;
+        if (!seq_ok) {
+            std::cerr << "Warning: Sequential benchmark failed! Message: " << comp.seq_stats.error_message << std::endl;
+        }
+    } else {
+        std::cout << "\n[Info] Skipping sequential baseline (--no-seq requested)\n";
+        comp.has_seq = false;
     }
 
+    // 2. OpenMP CPU
     std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [2/2] RUNNING CPU BENCHMARK (rcarrascoc/MPolylla - OpenMP)\n"
+              << "  [2/3] RUNNING CPU MULTI-CORE BENCHMARK (rcarrascoc/MPolylla - OpenMP)\n"
               << "------------------------------------------------------------------------\n";
     bool cpu_ok = run_mpolylla_from_off(test_off_file.c_str(), tmp_cpu_json.c_str(), cpu_threads, &comp.cpu_stats);
     if (!cpu_ok) {
         std::cerr << "Warning: CPU benchmark failed! Message: " << comp.cpu_stats.error_message << std::endl;
     }
 
+    // 3. GPU CUDA
+    std::cout << "\n------------------------------------------------------------------------\n"
+              << "  [3/3] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla - CUDA)\n"
+              << "------------------------------------------------------------------------\n";
+    bool gpu_ok = run_gpolylla_from_off(test_off_file.c_str(), tmp_gpu_json.c_str(), &comp.gpu_stats);
+    if (!gpu_ok) {
+        std::cerr << "Warning: GPU benchmark failed! Message: " << comp.gpu_stats.error_message << std::endl;
+    }
+
     // Clean up temporary files
     if (is_temp_file) {
         std::remove(test_off_file.c_str());
     }
-    std::remove(tmp_gpu_json.c_str());
+    std::remove(tmp_seq_json.c_str());
     std::remove(tmp_cpu_json.c_str());
+    std::remove(tmp_gpu_json.c_str());
 
     // Calculate comparison & speedups
     comp.compute_comparison();
@@ -177,5 +201,5 @@ int main(int argc, char* argv[]) {
     }
     comp.save_json(output_json);
 
-    return (gpu_ok && cpu_ok) ? 0 : 1;
+    return (cpu_ok && gpu_ok) ? 0 : 1;
 }

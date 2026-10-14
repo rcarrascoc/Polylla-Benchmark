@@ -4,3 +4,6 @@
 [submodule "submodules/MPolylla"]
 	path = submodules/MPolylla
 	url = https://github.com/rcarrascoc/MPolylla.git
+[submodule "submodules/Polylla-Mesh-DCEL"]
+	path = submodules/Polylla-Mesh-DCEL
+	url = https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git
