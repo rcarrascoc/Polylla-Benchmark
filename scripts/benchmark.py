@@ -81,8 +81,11 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, no_seq: 
             has_seq = data.get("has_sequential_baseline", False)
             has_task = data.get("has_omp_task", False)
             seq_time = data["sequential"]["time_total_algorithm"] if has_seq else None
-            loops_data = data.get("cpu_loops", data.get("cpu", {}))
-            tasks_data = data.get("cpu_tasks", {})
+            data_dict = data.get("cpu_data", data.get("cpu_loops", data.get("cpu", {})))
+            tasks_dict = data.get("cpu_tasks", {})
+
+            omp_data_time = data_dict.get("time_total_algorithm", 0.0)
+            omp_task_time = tasks_dict.get("time_total_algorithm", 0.0) if has_task else None
 
             rec = {
                 "requested_size": data["requested_size"],
@@ -90,14 +93,16 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, no_seq: 
                 "n_faces": data["gpu"]["n_faces"],
                 "n_polygons": data["gpu"]["n_polygons"],
                 "seq_time_ms": seq_time,
-                "omp_loops_time_ms": loops_data.get("time_total_algorithm", 0.0),
-                "omp_tasks_time_ms": tasks_data.get("time_total_algorithm", 0.0) if has_task else None,
+                "omp_data_time_ms": omp_data_time,
+                "omp_loops_time_ms": omp_data_time,  # backwards compatibility
+                "omp_tasks_time_ms": omp_task_time,
                 "gpu_time_ms": data["gpu"]["time_total_algorithm"],
                 "gpu_total_with_copies_ms": data["gpu"]["time_total_with_copies"],
                 "gpu_copy_in_ms": data["gpu"]["time_copy_to_device"],
                 "gpu_copy_out_ms": data["gpu"]["time_back_to_host"],
                 "speedup_gpu_vs_seq": data.get("speedup_gpu_vs_sequential", 0.0),
                 "speedup_gpu_with_copies_vs_seq": data.get("speedup_gpu_with_copies_vs_sequential", 0.0),
+                "speedup_data_vs_seq": data.get("speedup_omp_data_vs_sequential", data.get("speedup_omp_vs_sequential", 0.0)),
                 "speedup_omp_vs_seq": data.get("speedup_omp_vs_sequential", 0.0),
                 "speedup_task_vs_seq": data.get("speedup_omp_task_vs_sequential", 0.0),
                 "speedup_gpu_vs_omp": data.get("speedup_gpu_vs_omp", 0.0),
@@ -119,7 +124,7 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, no_seq: 
     print("\n" + "=" * 135)
     print(f"                                      SWEEP SUMMARY ({mesh_type.upper()}, SEED={seed})")
     print("=" * 135)
-    header = f"{'Size (N)':>10} | {'Seq (ms)':>11} | {'OMP Loop':>11} | {'OMP Task':>11} | {'GPU (ms)':>11} | {'GPU+Trans':>11} | {'GPU/Seq':>9} | {'Task/Seq':>9} | {'Task/Loop':>9}"
+    header = f"{'Size (N)':>10} | {'Seq (ms)':>11} | {'OMP Data':>11} | {'OMP Task':>11} | {'GPU (ms)':>11} | {'GPU+Trans':>11} | {'GPU/Seq':>9} | {'Task/Seq':>9} | {'Data/Seq':>9}"
     print(header)
     print("-" * 135)
     for _, row in df.iterrows():
@@ -127,63 +132,23 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, no_seq: 
         task_str = f"{row['omp_tasks_time_ms']:>11.3f}" if row['omp_tasks_time_ms'] is not None else f"{'-':>11}"
         gpu_seq_str = f"{row['speedup_gpu_vs_seq']:>8.2f}x" if row['speedup_gpu_vs_seq'] > 0 else f"{'-':>9}"
         task_seq_str = f"{row['speedup_task_vs_seq']:>8.2f}x" if row['speedup_task_vs_seq'] > 0 else f"{'-':>9}"
-        task_omp_str = f"{row['speedup_task_vs_omp']:>8.2f}x" if row['speedup_task_vs_omp'] > 0 else f"{'-':>9}"
-        print(f"{int(row['requested_size']):>10} | {seq_str} | {row['omp_loops_time_ms']:>11.3f} | {task_str} | {row['gpu_time_ms']:>11.3f} | {row['gpu_total_with_copies_ms']:>11.3f} | {gpu_seq_str} | {task_seq_str} | {task_omp_str}")
+        data_seq_str = f"{row['speedup_data_vs_seq']:>8.2f}x" if row['speedup_data_vs_seq'] > 0 else f"{'-':>9}"
+        print(f"{int(row['requested_size']):>10} | {seq_str} | {row['omp_data_time_ms']:>11.3f} | {task_str} | {row['gpu_time_ms']:>11.3f} | {row['gpu_total_with_copies_ms']:>11.3f} | {gpu_seq_str} | {task_seq_str} | {data_seq_str}")
     print("=" * 135 + "\n")
 
     if plot:
         generate_plots(df, mesh_type, seed)
 
 def generate_plots(df: pd.DataFrame, mesh_type: str, seed: int):
-    """Generates comparison charts."""
-    PLOTS_DIR.mkdir(exist_ok=True)
-
-    has_seq = df["seq_time_ms"].notnull().all() and (df["speedup_gpu_vs_seq"] > 0).any()
-    has_task = "omp_tasks_time_ms" in df.columns and df["omp_tasks_time_ms"].notnull().any()
-
-    # 1. Speedup Plot
-    plt.figure(figsize=(10, 6))
-    if has_seq:
-        plt.plot(df["n_vertices"], df["speedup_gpu_vs_seq"], marker="o", color="#2ca02c", linewidth=2.5, label="GPU (GPolylla) vs Sequential Baseline")
-        plt.plot(df["n_vertices"], df["speedup_gpu_with_copies_vs_seq"], marker="s", color="#8c564b", linestyle="--", linewidth=2, label="GPU (With Transfers) vs Sequential")
-        plt.plot(df["n_vertices"], df["speedup_omp_vs_seq"], marker="^", color="#1f77b4", linewidth=2, label="CPU Loops (MPolylla main) vs Sequential")
-        if has_task:
-            plt.plot(df["n_vertices"], df["speedup_task_vs_seq"], marker="v", color="#9467bd", linewidth=2, label="CPU Tasks (MPolylla Task) vs Sequential")
-    plt.plot(df["n_vertices"], df["speedup_gpu_vs_omp"], marker="d", color="#d62728", linestyle="-.", linewidth=2, label="GPU vs OpenMP Loops")
-    if has_task:
-        plt.plot(df["n_vertices"], df["speedup_gpu_vs_task"], marker="p", color="#e377c2", linestyle=":", linewidth=2, label="GPU vs OpenMP Tasks")
-    plt.axhline(1.0, color="gray", linestyle=":", label="1.0x Parity")
-    plt.xlabel("Number of Vertices", fontsize=12)
-    plt.ylabel("Speedup Factor (X)", fontsize=12)
-    plt.title(f"Polylla Parallel Speedup\nMesh: {mesh_type.capitalize()}, Seed: {seed}", fontsize=13)
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.legend(fontsize=9)
-    plt.ticklabel_format(style="sci", axis="x", scilimits=(0, 0))
-    speedup_path = PLOTS_DIR / f"speedup_{mesh_type}.png"
-    plt.savefig(speedup_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"[Plot] Saved speedup plot to: {speedup_path}")
-
-    # 2. Time Comparison Plot (Log Scale)
-    plt.figure(figsize=(10, 6))
-    if has_seq:
-        plt.plot(df["n_vertices"], df["seq_time_ms"], marker="x", color="#7f7f7f", linewidth=2, label="Sequential Baseline (Polylla-Mesh-DCEL)")
-    plt.plot(df["n_vertices"], df["omp_loops_time_ms"], marker="^", color="#1f77b4", linewidth=2, label="OpenMP Loops (MPolylla main)")
-    if has_task:
-        plt.plot(df["n_vertices"], df["omp_tasks_time_ms"], marker="v", color="#9467bd", linewidth=2, label="OpenMP Tasks (MPolylla Task)")
-    plt.plot(df["n_vertices"], df["gpu_total_with_copies_ms"], marker="s", color="#ff7f0e", linestyle="--", linewidth=2, label="GPU Total (GPolylla + Transfers)")
-    plt.plot(df["n_vertices"], df["gpu_time_ms"], marker="o", color="#2ca02c", linewidth=2.5, label="GPU Alg Only (GPolylla)")
-    plt.xlabel("Number of Vertices", fontsize=12)
-    plt.ylabel("Execution Time in ms (Log Scale)", fontsize=12)
-    plt.yscale("log")
-    plt.title(f"Polylla Execution Time: Sequential vs OpenMP Loops vs Tasks vs GPU\nMesh: {mesh_type.capitalize()}, Seed: {seed}", fontsize=13)
-    plt.grid(True, which="both", linestyle="--", alpha=0.6)
-    plt.legend(fontsize=9)
-    plt.ticklabel_format(style="sci", axis="x", scilimits=(0, 0))
-    time_path = PLOTS_DIR / f"time_{mesh_type}.png"
-    plt.savefig(time_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"[Plot] Saved time comparison plot to: {time_path}")
+    """Delegates to standalone plot module for unified plotting."""
+    try:
+        from plot import plot_benchmark_data
+        plot_benchmark_data(df, mesh_type, seed, PLOTS_DIR)
+    except ImportError:
+        # Fallback if run from other directory
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from plot import plot_benchmark_data
+        plot_benchmark_data(df, mesh_type, seed, PLOTS_DIR)
 
 def main():
     parser = argparse.ArgumentParser(description="PPolylla Parallel Benchmark Suite (Sequential vs OpenMP vs CUDA)")
@@ -196,8 +161,19 @@ def main():
     parser.add_argument("--sweep", action="store_true", help="Run sweep over multiple sizes")
     parser.add_argument("--sizes", type=str, default="10000,50000,100000,500000,1000000", help="Comma-separated sizes for sweep")
     parser.add_argument("--no-plot", action="store_true", help="Disable plot generation")
+    parser.add_argument("--plot-only", action="store_true", help="Only generate plots from existing CSV results")
+    parser.add_argument("--csv", type=str, default=None, help="Specific CSV file to plot (when using --plot-only)")
 
     args = parser.parse_args()
+
+    if args.plot_only or args.csv:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import plot as plotter
+        if args.csv:
+            plotter.plot_file(Path(args.csv))
+        else:
+            plotter.main()
+        return
 
     if args.sweep:
         sizes = [int(x.strip()) for x in args.sizes.split(",")]

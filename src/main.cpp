@@ -170,13 +170,13 @@ int main(int argc, char* argv[]) {
         comp.has_seq = false;
     }
 
-    // 2. OpenMP CPU (Loops - main branch)
+    // 2. OpenMP CPU (Data - main branch)
     std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [2/4] RUNNING CPU MULTI-CORE LOOPS (rcarrascoc/MPolylla - main)\n"
+              << "  [2/4] RUNNING CPU MULTI-CORE DATA (rcarrascoc/MPolylla - main)\n"
               << "------------------------------------------------------------------------\n";
     bool cpu_ok = run_mpolylla_from_off(test_off_file.c_str(), tmp_cpu_json.c_str(), cpu_threads, &comp.cpu_stats);
     if (!cpu_ok) {
-        std::cerr << "Warning: CPU Loops benchmark failed! Message: " << comp.cpu_stats.error_message << std::endl;
+        std::cerr << "Warning: CPU Data benchmark failed! Message: " << comp.cpu_stats.error_message << std::endl;
     }
 
     // 3. OpenMP CPU (Tasks - Task branch)

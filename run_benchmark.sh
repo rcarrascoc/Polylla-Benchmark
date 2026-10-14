@@ -26,8 +26,8 @@ if [ ! -f "${BINARY}" ]; then
     echo "[PPolylla] Build successful!"
 fi
 
-# Check if user requested sweep via Python
-if [[ "$*" == *"--sweep"* ]]; then
+# Check if user requested sweep or plotting via Python
+if [[ "$*" == *"--sweep"* ]] || [[ "$*" == *"--plot"* ]] || [[ "$*" == *"--plot-only"* ]]; then
     python3 "${SCRIPT_DIR}/scripts/benchmark.py" "$@"
     exit 0
 fi

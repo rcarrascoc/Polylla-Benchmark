@@ -207,7 +207,7 @@ struct BenchmarkComparison {
 
     bool has_seq = false;
     PolyllaStats seq_stats;
-    PolyllaStats cpu_stats;       // OpenMP Loops (branch main)
+    PolyllaStats cpu_stats;       // OpenMP Data (branch main)
     bool has_task = false;
     PolyllaStats task_stats;      // OpenMP Tasks (branch Task)
     PolyllaStats gpu_stats;       // CUDA GPU
@@ -215,11 +215,11 @@ struct BenchmarkComparison {
     SystemMetadata meta;
 
     double speedup_gpu_vs_seq = 0.0;             // Seq time / GPU time
-    double speedup_omp_vs_seq = 0.0;             // Seq time / OMP loop time
+    double speedup_omp_vs_seq = 0.0;             // Seq time / OMP data time
     double speedup_task_vs_seq = 0.0;            // Seq time / OMP task time
-    double speedup_gpu_vs_omp = 0.0;             // OMP loop time / GPU time
+    double speedup_gpu_vs_omp = 0.0;             // OMP data time / GPU time
     double speedup_gpu_vs_task = 0.0;            // OMP task time / GPU time
-    double speedup_task_vs_omp = 0.0;            // OMP loop time / OMP task time
+    double speedup_task_vs_omp = 0.0;            // OMP data time / OMP task time
     double speedup_gpu_with_copies_vs_seq = 0.0; // Seq time / (GPU time + copies)
 
     void compute_comparison() {
@@ -254,7 +254,7 @@ struct BenchmarkComparison {
         os << "\n"
            << "======================================================================================================================================\n"
            << "                                                  POLYLLA BENCHMARK COMPARISON REPORT                                                 \n"
-           << "                              (Sequential Baseline vs OpenMP Loops vs OpenMP Tasks vs CUDA GPU)                                       \n"
+           << "                               (Sequential Baseline vs OpenMP Data vs OpenMP Tasks vs CUDA GPU)                                       \n"
            << "======================================================================================================================================\n";
         os << "  Mesh Type:       " << mesh_type << "\n"
            << "  Requested Size:  " << requested_size << "\n"
@@ -262,7 +262,7 @@ struct BenchmarkComparison {
            << "  CPU Threads:     " << cpu_threads << "\n"
            << "  Mesh Gen Time:   " << std::fixed << std::setprecision(3) << mesh_gen_time_ms << " ms\n"
            << "--------------------------------------------------------------------------------------------------------------------------------------\n"
-           << "  Metric / Element             SEQ (Baseline)      OMP (Loops)       OMP (Tasks)       GPU (GPolylla)           Validation            \n"
+           << "  Metric / Element             SEQ (Baseline)       OMP (Data)       OMP (Tasks)       GPU (GPolylla)           Validation            \n"
            << "--------------------------------------------------------------------------------------------------------------------------------------\n";
 
         auto print_elem = [&](const char* name, long long seq, long long omp, long long task, long long gpu) {
@@ -283,7 +283,7 @@ struct BenchmarkComparison {
         print_elem("Polygons (n_polygons)", seq_stats.n_polygons, cpu_stats.n_polygons, task_stats.n_polygons, gpu_stats.n_polygons);
 
         os << "--------------------------------------------------------------------------------------------------------------------------------------\n"
-           << "  Phase Timers (ms)            SEQ (Baseline)      OMP (Loops)       OMP (Tasks)       GPU (GPolylla)         Speedup GPU/Seq         \n"
+           << "  Phase Timers (ms)            SEQ (Baseline)       OMP (Data)       OMP (Tasks)       GPU (GPolylla)         Speedup GPU/Seq         \n"
            << "--------------------------------------------------------------------------------------------------------------------------------------\n";
 
         auto print_timer = [&](const char* name, double seq_t, double omp_t, double task_t, double gpu_t) {
@@ -323,15 +323,15 @@ struct BenchmarkComparison {
         if (has_seq) {
             os << "  >>> SPEEDUP GPU vs Sequential (Alg only):            " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_seq << "x\n";
             os << "  >>> SPEEDUP GPU vs Sequential (With Transfers):      " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_with_copies_vs_seq << "x\n";
-            os << "  >>> SPEEDUP OpenMP (Loops) vs Sequential:            " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_omp_vs_seq << "x\n";
+            os << "  >>> SPEEDUP OpenMP (Data) vs Sequential:             " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_omp_vs_seq << "x\n";
             if (has_task) {
                 os << "  >>> SPEEDUP OpenMP (Tasks) vs Sequential:            " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_seq << "x\n";
             }
         }
-        os << "  >>> SPEEDUP GPU vs OpenMP (Loops):                   " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_omp << "x\n";
+        os << "  >>> SPEEDUP GPU vs OpenMP (Data):                    " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_omp << "x\n";
         if (has_task) {
             os << "  >>> SPEEDUP GPU vs OpenMP (Tasks):                   " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_task << "x\n";
-            os << "  >>> SPEEDUP OpenMP (Tasks) vs OpenMP (Loops):        " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_omp << "x\n";
+            os << "  >>> SPEEDUP OpenMP (Tasks) vs OpenMP (Data):         " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_omp << "x\n";
         }
         os << "======================================================================================================================================\n\n";
     }
@@ -360,7 +360,7 @@ struct BenchmarkComparison {
             << "  Project (PPolylla):         " << meta.commit_main << "\n"
             << "  Baseline (Sequential):      https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git\n"
             << "                              Commit: " << meta.commit_seq << "\n"
-            << "  OpenMP Loops (MPolylla):    https://github.com/rcarrascoc/MPolylla.git (branch main)\n"
+            << "  OpenMP Data (MPolylla):     https://github.com/rcarrascoc/MPolylla.git (branch main)\n"
             << "                              Commit: " << meta.commit_mpolylla << "\n"
             << "  OpenMP Tasks (MPolylla):    https://github.com/rcarrascoc/MPolylla.git (branch Task)\n"
             << "                              Commit: " << meta.commit_mpolylla_task << "\n"
@@ -429,10 +429,13 @@ struct BenchmarkComparison {
             << "  \"has_omp_task\": " << (has_task ? "true" : "false") << ",\n"
             << "  \"speedup_gpu_vs_sequential\": " << speedup_gpu_vs_seq << ",\n"
             << "  \"speedup_gpu_with_copies_vs_sequential\": " << speedup_gpu_with_copies_vs_seq << ",\n"
+            << "  \"speedup_omp_data_vs_sequential\": " << speedup_omp_vs_seq << ",\n"
             << "  \"speedup_omp_vs_sequential\": " << speedup_omp_vs_seq << ",\n"
             << "  \"speedup_omp_task_vs_sequential\": " << speedup_task_vs_seq << ",\n"
+            << "  \"speedup_gpu_vs_omp_data\": " << speedup_gpu_vs_omp << ",\n"
             << "  \"speedup_gpu_vs_omp\": " << speedup_gpu_vs_omp << ",\n"
             << "  \"speedup_gpu_vs_omp_task\": " << speedup_gpu_vs_task << ",\n"
+            << "  \"speedup_omp_task_vs_omp_data\": " << speedup_task_vs_omp << ",\n"
             << "  \"speedup_omp_task_vs_omp\": " << speedup_task_vs_omp << ",\n";
 
         if (has_seq) {
@@ -451,7 +454,7 @@ struct BenchmarkComparison {
                 << "  },\n";
         }
 
-        out << "  \"cpu_loops\": {\n"
+        out << "  \"cpu_data\": {\n"
             << "    \"n_vertices\": " << cpu_stats.n_vertices << ",\n"
             << "    \"n_faces\": " << cpu_stats.n_faces << ",\n"
             << "    \"n_half_edges\": " << cpu_stats.n_half_edges << ",\n"
