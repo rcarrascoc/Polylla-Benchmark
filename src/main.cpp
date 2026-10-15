@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 
 #include "src/common/benchmark_types.hpp"
+#include "src/common/cpu_affinity.hpp"
 #include "src/generators/mesh_generator.hpp"
 #include "src/runners/seq_runner.hpp"
 #include "src/runners/gpu_runner.hpp"
@@ -23,19 +24,22 @@ void print_help(const char* prog_name) {
               << "  -t, --type <grid|uniform>    Mesh distribution type (default: uniform)\n"
               << "  -s, --size <N>               Target number of vertices (default: 100000)\n"
               << "  -r, --seed <SEED>            Random seed for reproducibility (default: 42)\n"
-              << "  -j, --threads <T>            OpenMP threads for CPU (default: 0 = all cores)\n"
+              << "  -j, --threads <T>            OpenMP threads count (default: 0 = all cores or count of --cores)\n"
+              << "  -c, --cores <SPEC>           CPU core affinity for OpenMP (e.g. '0-7', '8-19', 'p-cores', 'e-cores')\n"
               << "  -o, --output <FILE>          Path to save comparison JSON (default: results/...)\n"
               << "  -f, --off <FILE>             Run benchmark on an existing .off file\n"
               << "  --no-seq                     Skip sequential CPU baseline (useful for very large meshes)\n"
               << "  --save-mesh <FILE>           Save the generated mesh to a persistent .off file\n"
               << "  -h, --help                   Show this help message\n\n"
-              << "Examples:\n"
-              << "  # Run uniform mesh with 100k vertices and seed 42 (Sequential vs OpenMP vs GPU):\n"
-              << "  " << prog_name << " --type uniform --size 100000 --seed 42\n\n"
-              << "  # Run grid mesh with 500k points:\n"
-              << "  " << prog_name << " --type grid --size 500000\n\n"
-              << "  # Run benchmark on custom OFF file using 16 CPU threads:\n"
-              << "  " << prog_name << " --off submodules/MPolylla/examples/pikachu.off --threads 16\n"
+              << "Core Selection Examples:\n"
+              << "  # Run on all 8 Performance cores (P-cores 0-7):\n"
+              << "  " << prog_name << " --cores p-cores\n\n"
+              << "  # Run on 4 threads pinned to cores 0-3:\n"
+              << "  " << prog_name << " --cores 0-3 --threads 4\n\n"
+              << "  # Run on all 12 Efficient cores (E-cores 8-19):\n"
+              << "  " << prog_name << " --cores e-cores\n\n"
+              << "  # Run on specific arbitrary cores (0, 2, 4, 6):\n"
+              << "  " << prog_name << " --cores 0,2,4,6\n"
               << "========================================================================================\n\n";
 }
 
@@ -44,6 +48,7 @@ int main(int argc, char* argv[]) {
     int requested_size = 100000;
     uint64_t seed = 42;
     int cpu_threads = 0;
+    std::string cores_spec = "";
     std::string output_json = "";
     std::string input_off = "";
     std::string save_mesh_path = "";
@@ -54,6 +59,7 @@ int main(int argc, char* argv[]) {
         {"size",      required_argument, 0, 's'},
         {"seed",      required_argument, 0, 'r'},
         {"threads",   required_argument, 0, 'j'},
+        {"cores",     required_argument, 0, 'c'},
         {"output",    required_argument, 0, 'o'},
         {"off",       required_argument, 0, 'f'},
         {"no-seq",    no_argument,       0, 1002},
@@ -64,12 +70,13 @@ int main(int argc, char* argv[]) {
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "t:s:r:j:o:f:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "t:s:r:j:c:o:f:h", long_options, &option_index)) != -1) {
         switch (opt) {
             case 't': mesh_type = optarg; break;
             case 's': requested_size = std::atoi(optarg); break;
             case 'r': seed = std::strtoull(optarg, nullptr, 10); break;
             case 'j': cpu_threads = std::atoi(optarg); break;
+            case 'c': cores_spec = optarg; break;
             case 'o': output_json = optarg; break;
             case 'f': input_off = optarg; break;
             case 1001: save_mesh_path = optarg; break;
@@ -87,11 +94,28 @@ int main(int argc, char* argv[]) {
         mkdir("results", 0775);
     }
 
+    // Detect CPU topology and configure affinity
+    CpuTopologyInfo topo = CpuAffinityManager::get_topology();
+    std::string affinity_desc = "all";
+    std::vector<int> affinity_cores;
+    if (!cores_spec.empty()) {
+        affinity_cores = CpuAffinityManager::parse_cores_spec(cores_spec, topo, affinity_desc);
+    } else {
+        for (int i = 0; i < topo.total_logical_cores; i++) affinity_cores.push_back(i);
+        affinity_desc = "all (" + std::to_string(topo.total_logical_cores) + " cores: 0-" + std::to_string(topo.total_logical_cores - 1) + ")";
+    }
+
+    if (cpu_threads <= 0) {
+        cpu_threads = static_cast<int>(affinity_cores.size());
+    }
+
     BenchmarkComparison comp;
     comp.mesh_type = mesh_type;
     comp.requested_size = requested_size;
     comp.seed = seed;
-    comp.cpu_threads = (cpu_threads > 0) ? cpu_threads : sysconf(_SC_NPROCESSORS_ONLN);
+    comp.cpu_threads = cpu_threads;
+    comp.cpu_cores_affinity = affinity_desc;
+    comp.cpu_cores_list = affinity_cores;
 
     std::string full_cmd_line = "";
     for (int i = 0; i < argc; i++) {
@@ -99,6 +123,9 @@ int main(int argc, char* argv[]) {
         if (i < argc - 1) full_cmd_line += " ";
     }
     comp.meta.detect(full_cmd_line);
+
+    std::cout << "[Affinity] Selected OpenMP cores: " << affinity_desc 
+              << " | Active threads: " << comp.cpu_threads << std::endl;
 
     std::string test_off_file;
     bool is_temp_file = false;
@@ -174,7 +201,11 @@ int main(int argc, char* argv[]) {
     std::cout << "\n------------------------------------------------------------------------\n"
               << "  [2/4] RUNNING CPU MULTI-CORE DATA (rcarrascoc/MPolylla - main)\n"
               << "------------------------------------------------------------------------\n";
-    bool cpu_ok = run_mpolylla_from_off(test_off_file.c_str(), tmp_cpu_json.c_str(), cpu_threads, &comp.cpu_stats);
+    bool cpu_ok = false;
+    {
+        ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
+        cpu_ok = run_mpolylla_from_off(test_off_file.c_str(), tmp_cpu_json.c_str(), comp.cpu_threads, &comp.cpu_stats);
+    }
     if (!cpu_ok) {
         std::cerr << "Warning: CPU Data benchmark failed! Message: " << comp.cpu_stats.error_message << std::endl;
     }
@@ -183,7 +214,11 @@ int main(int argc, char* argv[]) {
     std::cout << "\n------------------------------------------------------------------------\n"
               << "  [3/4] RUNNING CPU MULTI-CORE TASKS (rcarrascoc/MPolylla - Task)\n"
               << "------------------------------------------------------------------------\n";
-    bool task_ok = run_mpolylla_task_from_off(test_off_file.c_str(), tmp_task_json.c_str(), cpu_threads, &comp.task_stats);
+    bool task_ok = false;
+    {
+        ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
+        task_ok = run_mpolylla_task_from_off(test_off_file.c_str(), tmp_task_json.c_str(), comp.cpu_threads, &comp.task_stats);
+    }
     comp.has_task = task_ok;
     if (!task_ok) {
         std::cerr << "Warning: CPU Tasks benchmark failed! Message: " << comp.task_stats.error_message << std::endl;

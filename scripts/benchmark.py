@@ -34,7 +34,7 @@ def ensure_built():
         subprocess.check_call(cmd_make, cwd=BUILD_DIR)
         print("[Build] Build completed successfully.\n")
 
-def run_single(mesh_type: str, size: int, seed: int, threads: int = 0, no_seq: bool = False, output_json: str = None):
+def run_single(mesh_type: str, size: int, seed: int, threads: int = 0, cores: str = "", no_seq: bool = False, output_json: str = None):
     """Executes a single benchmark run."""
     ensure_built()
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -53,6 +53,8 @@ def run_single(mesh_type: str, size: int, seed: int, threads: int = 0, no_seq: b
     ]
     if threads > 0:
         cmd.extend(["--threads", str(threads)])
+    if cores:
+        cmd.extend(["--cores", str(cores)])
     if no_seq:
         cmd.append("--no-seq")
 
@@ -67,7 +69,7 @@ def run_single(mesh_type: str, size: int, seed: int, threads: int = 0, no_seq: b
             return json.load(f)
     return None
 
-def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, no_seq: bool = False, plot: bool = True):
+def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, cores: str = "", no_seq: bool = False, plot: bool = True):
     """Executes a sweep over multiple mesh sizes and optionally plots the results."""
     ensure_built()
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -76,7 +78,7 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, no_seq: 
     records = []
     for sz in sizes:
         print(f"\n>>> Running sweep point: type={mesh_type}, size={sz}, seed={seed} <<<")
-        data = run_single(mesh_type, sz, seed, threads, no_seq=no_seq)
+        data = run_single(mesh_type, sz, seed, threads=threads, cores=cores, no_seq=no_seq)
         if data:
             has_seq = data.get("has_sequential_baseline", False)
             has_task = data.get("has_omp_task", False)
@@ -92,6 +94,8 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, no_seq: 
                 "n_vertices": data["gpu"]["n_vertices"],
                 "n_faces": data["gpu"]["n_faces"],
                 "n_polygons": data["gpu"]["n_polygons"],
+                "cpu_threads": data.get("cpu_threads", threads),
+                "cpu_cores_affinity": data.get("cpu_cores_affinity", "all"),
                 "seq_time_ms": seq_time,
                 "omp_data_time_ms": omp_data_time,
                 "omp_loops_time_ms": omp_data_time,  # backwards compatibility
@@ -155,7 +159,8 @@ def main():
     parser.add_argument("-t", "--type", choices=["grid", "uniform"], default="uniform", help="Mesh type (grid or uniform)")
     parser.add_argument("-s", "--size", type=int, default=100000, help="Number of vertices for single run (default: 100000)")
     parser.add_argument("-r", "--seed", type=int, default=42, help="Random seed (default: 42)")
-    parser.add_argument("-j", "--threads", type=int, default=0, help="OpenMP threads (default: 0 = all cores)")
+    parser.add_argument("-j", "--threads", type=int, default=0, help="OpenMP threads (default: 0 = all cores or count of --cores)")
+    parser.add_argument("-c", "--cores", type=str, default="", help="CPU core affinity for OpenMP (e.g. '0-7', '8-19', 'p-cores', 'e-cores')")
     parser.add_argument("-o", "--output", type=str, default=None, help="Output JSON path")
     parser.add_argument("--no-seq", action="store_true", help="Skip sequential CPU baseline")
     parser.add_argument("--sweep", action="store_true", help="Run sweep over multiple sizes")
@@ -177,9 +182,9 @@ def main():
 
     if args.sweep:
         sizes = [int(x.strip()) for x in args.sizes.split(",")]
-        run_sweep(args.type, sizes, args.seed, args.threads, no_seq=args.no_seq, plot=not args.no_plot)
+        run_sweep(args.type, sizes, args.seed, threads=args.threads, cores=args.cores, no_seq=args.no_seq, plot=not args.no_plot)
     else:
-        run_single(args.type, args.size, args.seed, args.threads, no_seq=args.no_seq, output_json=args.output)
+        run_single(args.type, args.size, args.seed, threads=args.threads, cores=args.cores, no_seq=args.no_seq, output_json=args.output)
 
 if __name__ == "__main__":
     main()

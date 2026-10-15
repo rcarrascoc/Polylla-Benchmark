@@ -201,6 +201,8 @@ struct BenchmarkComparison {
     int requested_size = 0;
     uint64_t seed = 0;
     int cpu_threads = 0;
+    std::string cpu_cores_affinity = "all";
+    std::vector<int> cpu_cores_list;
 
     double mesh_gen_time_ms = 0.0;
     double off_write_time_ms = 0.0;
@@ -260,6 +262,7 @@ struct BenchmarkComparison {
            << "  Requested Size:  " << requested_size << "\n"
            << "  Random Seed:     " << seed << "\n"
            << "  CPU Threads:     " << cpu_threads << "\n"
+           << "  CPU Cores/Aff:   " << cpu_cores_affinity << "\n"
            << "  Mesh Gen Time:   " << std::fixed << std::setprecision(3) << mesh_gen_time_ms << " ms\n"
            << "--------------------------------------------------------------------------------------------------------------------------------------\n"
            << "  Metric / Element             SEQ (Baseline)       OMP (Data)       OMP (Tasks)       GPU (GPolylla)           Validation            \n"
@@ -372,6 +375,7 @@ struct BenchmarkComparison {
             << "  Requested Vertices:   " << requested_size << "\n"
             << "  Random Seed:          " << seed << "\n"
             << "  CPU OpenMP Threads:   " << cpu_threads << "\n"
+            << "  CPU Core Affinity:    " << cpu_cores_affinity << "\n"
             << "  Mesh Gen Time (RAM):  " << std::fixed << std::setprecision(3) << mesh_gen_time_ms << " ms\n"
             << "  RAM Buffer Write:     " << std::fixed << std::setprecision(3) << off_write_time_ms << " ms\n\n";
 
@@ -391,6 +395,9 @@ struct BenchmarkComparison {
             << "  To reproduce this exact experiment with the same input mesh, execute:\n"
             << "  ./run_benchmark.sh --type " << mesh_type << " --size " << requested_size << " --seed " << seed;
         if (cpu_threads > 0) out << " --threads " << cpu_threads;
+        if (!cpu_cores_affinity.empty() && cpu_cores_affinity.find("all") == std::string::npos) {
+            out << " --cores \"" << cpu_cores_affinity << "\"";
+        }
         out << "\n"
             << "======================================================================================================================================\n";
 
@@ -424,7 +431,9 @@ struct BenchmarkComparison {
             << "  \"requested_size\": " << requested_size << ",\n"
             << "  \"seed\": " << seed << ",\n"
             << "  \"cpu_threads\": " << cpu_threads << ",\n"
+            << "  \"cpu_cores_affinity\": \"" << cpu_cores_affinity << "\",\n"
             << "  \"mesh_gen_time_ms\": " << mesh_gen_time_ms << ",\n"
+            << "  \"off_write_time_ms\": " << off_write_time_ms << ",\n"
             << "  \"has_sequential_baseline\": " << (has_seq ? "true" : "false") << ",\n"
             << "  \"has_omp_task\": " << (has_task ? "true" : "false") << ",\n"
             << "  \"speedup_gpu_vs_sequential\": " << speedup_gpu_vs_seq << ",\n"

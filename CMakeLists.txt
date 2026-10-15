@@ -101,6 +101,8 @@ target_link_libraries(ppolylla_benchmark PRIVATE
     mpolylla_runner
     mpolylla_task_runner
     gpolylla_runner
+    OpenMP::OpenMP_CXX
+    pthread
 )
 
 # Set runtime path so the executable finds its runner libraries
