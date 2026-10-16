@@ -133,6 +133,22 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
 
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
     
+    # Determine number of cores used for OpenMP
+    omp_cores = None
+    if "cpu_threads" in df.columns and df["cpu_threads"].notnull().any():
+        try:
+            val = df["cpu_threads"].dropna().iloc[0]
+            if pd.notnull(val) and int(float(val)) > 0:
+                omp_cores = int(float(val))
+        except Exception:
+            pass
+
+    if omp_cores is None:
+        omp_cores = os.cpu_count() or 1
+
+    core_unit = "core" if omp_cores == 1 else "cores"
+    omp_suffix = f" ({omp_cores} {core_unit})"
+
     # -------------------------------------------------------------------------
     # 1. SPEEDUP PLOTS (Strictly every variable over Sequential Baseline)
     # -------------------------------------------------------------------------
@@ -141,20 +157,20 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         def draw_speedup_curves(ax, log_scale=False):
             ax.plot(df["n_vertices"], df["calc_speedup_gpu_alg"],
                     marker="o", markersize=8, color="#2ca02c", linewidth=2.5,
-                    label="GPU (GPolylla)")
+                    label="GPolylla")
             if dcel_time_col:
                 ax.plot(df["n_vertices"], df["calc_speedup_dcel"],
                         marker="s", markersize=7, color="#ff7f0e", linewidth=2.2,
-                        label="OpenMP DCEL (MPolylla-Mesh-DCEL)")
+                        label=f"MPolylla DCEL{omp_suffix}")
             if data_time_col:
                 ax.plot(df["n_vertices"], df["calc_speedup_data"],
                         marker="^", markersize=7, color="#1f77b4", linewidth=2.2,
-                        label="OpenMP Data (MPolylla)")
+                        label=f"MPolylla Data{omp_suffix}")
             if task_time_col:
                 ax.plot(df["n_vertices"], df["calc_speedup_task"],
                         marker="v", markersize=7, color="#9467bd", linewidth=2.2,
-                        label="OpenMP Task (MPolylla)")
-            ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.5, label="Sequential Baseline (1.0x)")
+                        label=f"MPolylla Task{omp_suffix}")
+            ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.5, label="Polylla-Mesh-DCEL")
 
             x_min, x_max = df["n_vertices"].min(), df["n_vertices"].max()
             x_span = x_max - x_min if x_max > x_min else x_max
@@ -225,22 +241,22 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         if has_seq:
             ax.plot(df["n_vertices"], df[seq_time_col],
                     marker="x", markersize=8, color="#7f7f7f", linewidth=2.2,
-                    label="Sequential Baseline (Polylla-Mesh-DCEL)")
+                    label="Polylla-Mesh-DCEL")
         if dcel_time_col:
             ax.plot(df["n_vertices"], df[dcel_time_col],
                     marker="s", markersize=7, color="#ff7f0e", linewidth=2.2,
-                    label="OpenMP DCEL (MPolylla-Mesh-DCEL)")
+                    label=f"MPolylla DCEL{omp_suffix}")
         if data_time_col:
             ax.plot(df["n_vertices"], df[data_time_col],
                     marker="^", markersize=7, color="#1f77b4", linewidth=2.2,
-                    label="OpenMP Data (MPolylla)")
+                    label=f"MPolylla Data{omp_suffix}")
         if task_time_col:
             ax.plot(df["n_vertices"], df[task_time_col],
                     marker="v", markersize=7, color="#9467bd", linewidth=2.2,
-                    label="OpenMP Task (MPolylla)")
+                    label=f"MPolylla Task{omp_suffix}")
         ax.plot(df["n_vertices"], df["gpu_time_ms"],
                 marker="o", markersize=8, color="#2ca02c", linewidth=2.5,
-                label="GPU (GPolylla)")
+                label="GPolylla")
         if log_scale:
             ax.set_yscale("log")
         ax.set_xlabel("Number of Vertices", fontsize=11, fontweight="bold")
