@@ -71,19 +71,25 @@ BenchmarkComparison run_benchmark_instance(
     comp.cpu_cores_list = affinity_cores;
     comp.meta = meta;
 
-    std::string test_off_file;
-    bool is_temp_file = false;
+    MemoryMesh mesh;
 
     if (!input_off.empty()) {
-        test_off_file = input_off;
         comp.mesh_type = "file (" + input_off + ")";
-        std::cout << "[Benchmark] Using provided input mesh file: " << test_off_file << std::endl;
+        std::cout << "[Benchmark] Loading input mesh file into memory: " << input_off << std::endl;
+        auto t_load_0 = std::chrono::high_resolution_clock::now();
+        if (!mesh.load_off_file(input_off)) {
+            std::cerr << "Error: Could not load OFF file into memory: " << input_off << std::endl;
+            return comp;
+        }
+        auto t_load_1 = std::chrono::high_resolution_clock::now();
+        comp.mesh_gen_time_ms = std::chrono::duration<double, std::milli>(t_load_1 - t_load_0).count();
+        std::cout << "[MeshGen] Loaded " << mesh.n_vertices << " vertices and " 
+                  << mesh.n_faces << " triangles in " << comp.mesh_gen_time_ms << " ms\n";
     } else {
         std::cout << "\n========================================================================\n"
                   << "  GENERATING INPUT DATASET IN MEMORY (" << mesh_type << ", size=" << requested_size << ", seed=" << seed << ")\n"
                   << "========================================================================\n";
 
-        MemoryMesh mesh;
         if (mesh_type == "grid") {
             mesh = MeshGenerator::generate_grid(requested_size);
         } else if (mesh_type == "uniform") {
@@ -95,28 +101,15 @@ BenchmarkComparison run_benchmark_instance(
 
         comp.mesh_gen_time_ms = mesh.gen_time_ms;
         std::cout << "[MeshGen] Generated " << mesh.n_vertices << " vertices and " 
-                  << mesh.n_faces << " triangles in " << mesh.gen_time_ms << " ms\n";
-
-        std::string shm_dir = "/dev/shm";
-        if (access(shm_dir.c_str(), W_OK) != 0) {
-            shm_dir = "/tmp";
-        }
-        test_off_file = shm_dir + "/ppolylla_mesh_" + std::to_string(getpid()) + "_s" + std::to_string(seed) + ".off";
-        is_temp_file = true;
-
-        auto t_write_0 = std::chrono::high_resolution_clock::now();
-        if (!mesh.write_off_file(test_off_file)) {
-            std::cerr << "Error: Failed to write in-memory mesh to " << test_off_file << std::endl;
-            return comp;
-        }
-        auto t_write_1 = std::chrono::high_resolution_clock::now();
-        comp.off_write_time_ms = std::chrono::duration<double, std::milli>(t_write_1 - t_write_0).count();
-        std::cout << "[MeshGen] In-memory mesh written to RAM buffer (" << test_off_file 
-                  << ") in " << comp.off_write_time_ms << " ms\n";
+                  << mesh.n_faces << " triangles in " << mesh.gen_time_ms << " ms (in-memory zero-I/O)\n";
 
         if (!save_mesh_path.empty()) {
+            auto t_write_0 = std::chrono::high_resolution_clock::now();
             mesh.write_off_file(save_mesh_path);
-            std::cout << "[MeshGen] Persistent mesh saved to: " << save_mesh_path << "\n";
+            auto t_write_1 = std::chrono::high_resolution_clock::now();
+            comp.off_write_time_ms = std::chrono::duration<double, std::milli>(t_write_1 - t_write_0).count();
+            std::cout << "[MeshGen] Persistent mesh saved to: " << save_mesh_path 
+                      << " (wrote in " << comp.off_write_time_ms << " ms)\n";
         }
     }
 
@@ -130,7 +123,7 @@ BenchmarkComparison run_benchmark_instance(
         for (int r = 0; r < num_runs; ++r) {
             std::string tmp_seq_json = "/dev/shm/seq_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
             PolyllaStats s;
-            bool ok = run_seq_polylla_from_off(test_off_file.c_str(), tmp_seq_json.c_str(), &s);
+            bool ok = run_seq_polylla_from_memory(&mesh, tmp_seq_json.c_str(), &s);
             std::remove(tmp_seq_json.c_str());
             if (ok) {
                 if (num_runs > 1) {
@@ -158,16 +151,16 @@ BenchmarkComparison run_benchmark_instance(
 
     // 2. OpenMP CPU (DCEL - rcarrascoc/MPolylla-Mesh-DCEL)
     std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [2/5] RUNNING CPU MULTI-CORE DCEL (rcarrascoc/MPolylla-Mesh-DCEL"
-              << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
-              << "------------------------------------------------------------------------\n";
+                  << "  [2/5] RUNNING CPU MULTI-CORE DCEL (rcarrascoc/MPolylla-Mesh-DCEL"
+                  << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
+                  << "------------------------------------------------------------------------\n";
     std::vector<PolyllaStats> dcel_runs;
     {
         ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
         for (int r = 0; r < num_runs; ++r) {
             std::string tmp_dcel_json = "/dev/shm/dcel_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
             PolyllaStats s;
-            bool ok = run_mpolylla_dcel_from_off(test_off_file.c_str(), tmp_dcel_json.c_str(), comp.cpu_threads, &s);
+            bool ok = run_mpolylla_dcel_from_memory(&mesh, tmp_dcel_json.c_str(), comp.cpu_threads, &s);
             std::remove(tmp_dcel_json.c_str());
             if (ok) {
                 if (num_runs > 1) {
@@ -201,7 +194,7 @@ BenchmarkComparison run_benchmark_instance(
         for (int r = 0; r < num_runs; ++r) {
             std::string tmp_cpu_json = "/dev/shm/cpu_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
             PolyllaStats s;
-            bool ok = run_mpolylla_from_off(test_off_file.c_str(), tmp_cpu_json.c_str(), comp.cpu_threads, &s);
+            bool ok = run_mpolylla_from_memory(&mesh, tmp_cpu_json.c_str(), comp.cpu_threads, &s);
             std::remove(tmp_cpu_json.c_str());
             if (ok) {
                 if (num_runs > 1) {
@@ -234,7 +227,7 @@ BenchmarkComparison run_benchmark_instance(
         for (int r = 0; r < num_runs; ++r) {
             std::string tmp_task_json = "/dev/shm/task_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
             PolyllaStats s;
-            bool ok = run_mpolylla_task_from_off(test_off_file.c_str(), tmp_task_json.c_str(), comp.cpu_threads, &s);
+            bool ok = run_mpolylla_task_from_memory(&mesh, tmp_task_json.c_str(), comp.cpu_threads, &s);
             std::remove(tmp_task_json.c_str());
             if (ok) {
                 if (num_runs > 1) {
@@ -266,7 +259,7 @@ BenchmarkComparison run_benchmark_instance(
     for (int r = 0; r < num_runs; ++r) {
         std::string tmp_gpu_json = "/dev/shm/gpu_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
         PolyllaStats s;
-        bool ok = run_gpolylla_from_off(test_off_file.c_str(), tmp_gpu_json.c_str(), &s);
+        bool ok = run_gpolylla_from_memory(&mesh, tmp_gpu_json.c_str(), &s);
         std::remove(tmp_gpu_json.c_str());
         if (ok) {
             if (num_runs > 1) {
@@ -285,11 +278,6 @@ BenchmarkComparison run_benchmark_instance(
                       << comp.gpu_stats.d_time_to_generate_polygonal_mesh << " ± " 
                       << comp.gpu_stats.time_total_algorithm_std << " ms\n";
         }
-    }
-
-    // Clean up temporary mesh file
-    if (is_temp_file) {
-        std::remove(test_off_file.c_str());
     }
 
     comp.compute_comparison();

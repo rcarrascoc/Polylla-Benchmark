@@ -9,11 +9,12 @@
 #include <random>
 #include <cstdio>
 #include <unistd.h>
+#include <sstream>
 #include "delaunator.hpp"
 
 struct MemoryMesh {
     std::string name;
-    std::string type; // "grid" or "uniform"
+    std::string type; // "grid" or "uniform" or "off_file"
     int n_vertices = 0;
     int n_faces = 0;
     std::vector<double> x;
@@ -47,6 +48,101 @@ struct MemoryMesh {
 
         fclose(fp);
         return true;
+    }
+
+    bool load_off_file(const std::string& filepath) {
+        auto t_start = std::chrono::high_resolution_clock::now();
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            std::cerr << "Error: Could not open OFF file for reading: " << filepath << std::endl;
+            return false;
+        }
+
+        std::string line;
+        std::string header;
+        bool found_header = false;
+        int nv = 0, nf = 0, ne = 0;
+
+        while (std::getline(file, line)) {
+            size_t first = line.find_first_not_of(" \t\r\n");
+            if (first == std::string::npos || line[first] == '#') continue;
+            std::istringstream iss(line.substr(first));
+            if (!found_header) {
+                iss >> header;
+                if (header.find("OFF") == 0) {
+                    found_header = true;
+                    std::string rest = header.substr(3);
+                    if (!rest.empty()) {
+                        std::istringstream r_iss(rest);
+                        if (r_iss >> nv) {
+                            iss >> nf >> ne;
+                            break;
+                        }
+                    }
+                    if (iss >> nv >> nf >> ne) {
+                        break;
+                    }
+                } else {
+                    std::cerr << "Error: File is not a valid OFF file: " << filepath << std::endl;
+                    return false;
+                }
+            } else {
+                if (iss >> nv >> nf >> ne) {
+                    break;
+                }
+            }
+        }
+
+        if (nv <= 0 || nf <= 0) {
+            std::cerr << "Error: Invalid vertex or face count in OFF file: " << filepath << std::endl;
+            return false;
+        }
+
+        n_vertices = nv;
+        n_faces = nf;
+        x.clear();
+        y.clear();
+        faces.clear();
+        x.reserve(n_vertices);
+        y.reserve(n_vertices);
+        faces.reserve(3 * n_faces);
+
+        int v_read = 0;
+        while (v_read < n_vertices && std::getline(file, line)) {
+            size_t first = line.find_first_not_of(" \t\r\n");
+            if (first == std::string::npos || line[first] == '#') continue;
+            std::istringstream iss(line.substr(first));
+            double px, py, pz;
+            if (iss >> px >> py >> pz) {
+                x.push_back(px);
+                y.push_back(py);
+                v_read++;
+            }
+        }
+
+        int f_read = 0;
+        while (f_read < n_faces && std::getline(file, line)) {
+            size_t first = line.find_first_not_of(" \t\r\n");
+            if (first == std::string::npos || line[first] == '#') continue;
+            std::istringstream iss(line.substr(first));
+            int k, v0, v1, v2;
+            if (iss >> k >> v0 >> v1 >> v2) {
+                if (k != 3) {
+                    std::cerr << "Warning: Face with " << k << " vertices in OFF file." << std::endl;
+                }
+                faces.push_back(v0);
+                faces.push_back(v1);
+                faces.push_back(v2);
+                f_read++;
+            }
+        }
+
+        file.close();
+        auto t_end = std::chrono::high_resolution_clock::now();
+        gen_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        name = filepath;
+        type = "off_file";
+        return (v_read == n_vertices && f_read == n_faces);
     }
 };
 
