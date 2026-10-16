@@ -101,12 +101,35 @@ def annotate_endpoints(ax, items, x_last, fig, min_gap_pt=18.0, baseline_val=1.0
             ) if shifted else None,
         )
 
-def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int = 42, output_dir: Path = PLOTS_DIR):
+def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int = 42, output_dir: Path = PLOTS_DIR, seeds_info: str = "", runs: int = 1):
     """Generates speedup and time (linear and log) plots from a pandas DataFrame."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Sort DataFrame by vertex count
     df = df.sort_values(by="n_vertices").copy()
+
+    # Detect runs or seeds from DataFrame columns if available
+    if "runs" in df.columns and pd.notnull(df["runs"].iloc[0]):
+        try:
+            runs = int(float(df["runs"].iloc[0]))
+        except Exception:
+            pass
+    elif "runs_per_seed" in df.columns and pd.notnull(df["runs_per_seed"].iloc[0]):
+        try:
+            runs = int(float(df["runs_per_seed"].iloc[0]))
+        except Exception:
+            pass
+
+    if not seeds_info and "seeds_list" in df.columns and pd.notnull(df["seeds_list"].iloc[0]):
+        seeds_info = str(df["seeds_list"].iloc[0])
+
+    # Construct title subtitle
+    if seeds_info:
+        title_sub = f"Mesh: {mesh_type.capitalize()} (Seeds: {seeds_info}" + (f", {runs} runs/seed)" if runs > 1 else ")")
+    elif runs > 1:
+        title_sub = f"Mesh: {mesh_type.capitalize()} (Seed: {seed}, {runs} runs averaged)"
+    else:
+        title_sub = f"Mesh: {mesh_type.capitalize()} (Seed: {seed})"
 
     # Identify column names for Data (handling legacy 'omp_loops_time_ms' if needed)
     data_time_col = None
@@ -118,6 +141,13 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     dcel_time_col = "omp_dcel_time_ms" if "omp_dcel_time_ms" in df.columns and df["omp_dcel_time_ms"].notnull().any() else None
     task_time_col = "omp_tasks_time_ms" if "omp_tasks_time_ms" in df.columns and df["omp_tasks_time_ms"].notnull().any() else None
     seq_time_col = "seq_time_ms" if "seq_time_ms" in df.columns and df["seq_time_ms"].notnull().any() else None
+
+    # Standard deviation columns
+    seq_std_col = "seq_time_std_ms" if "seq_time_std_ms" in df.columns and df["seq_time_std_ms"].notnull().any() else None
+    dcel_std_col = "omp_dcel_time_std_ms" if "omp_dcel_time_std_ms" in df.columns and df["omp_dcel_time_std_ms"].notnull().any() else None
+    data_std_col = "omp_data_time_std_ms" if "omp_data_time_std_ms" in df.columns and df["omp_data_time_std_ms"].notnull().any() else None
+    task_std_col = "omp_tasks_time_std_ms" if "omp_tasks_time_std_ms" in df.columns and df["omp_tasks_time_std_ms"].notnull().any() else None
+    gpu_std_col = "gpu_time_std_ms" if "gpu_time_std_ms" in df.columns and df["gpu_time_std_ms"].notnull().any() else None
 
     # Compute Speedups strictly over baseline (T_baseline / T_variant)
     has_seq = seq_time_col is not None and (df[seq_time_col] > 0).any()
@@ -153,7 +183,6 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     # 1. SPEEDUP PLOTS (Strictly every variable over Sequential Baseline)
     # -------------------------------------------------------------------------
     if has_seq:
-        # Helper to plot speedup curves onto a given axes
         def draw_speedup_curves(ax, log_scale=False):
             ax.plot(df["n_vertices"], df["calc_speedup_gpu_alg"],
                     marker="o", markersize=8, color="#2ca02c", linewidth=2.5,
@@ -207,7 +236,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
         draw_speedup_curves(ax, log_scale=True)
         ax.set_ylabel("Speedup Factor (Log Scale over Baseline)", fontsize=12, fontweight="bold")
-        ax.set_title(f"Polylla Speedup vs Baseline (Log Scale)\nMesh: {mesh_type.capitalize()} (Seed: {seed})", fontsize=13, fontweight="bold", pad=12)
+        ax.set_title(f"Polylla Speedup vs Baseline (Log Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
         ax.grid(True, which="both", linestyle="--", alpha=0.6)
         ax.legend(fontsize=10, loc="upper left", framealpha=0.95)
         fig.tight_layout()
@@ -222,7 +251,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
         draw_speedup_curves(ax, log_scale=False)
         ax.set_ylabel("Speedup Factor (Linear over Baseline)", fontsize=12, fontweight="bold")
-        ax.set_title(f"Polylla Speedup vs Baseline (Linear Scale)\nMesh: {mesh_type.capitalize()} (Seed: {seed})", fontsize=13, fontweight="bold", pad=12)
+        ax.set_title(f"Polylla Speedup vs Baseline (Linear Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
         ax.grid(True, linestyle="--", alpha=0.6)
         ax.legend(fontsize=10, loc="upper left", framealpha=0.95)
         fig.tight_layout()
@@ -242,21 +271,51 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
             ax.plot(df["n_vertices"], df[seq_time_col],
                     marker="x", markersize=8, color="#7f7f7f", linewidth=2.2,
                     label="Polylla-Mesh-DCEL")
+            if seq_std_col and (df[seq_std_col] > 0).any():
+                ax.fill_between(df["n_vertices"],
+                                np.maximum(0.001, df[seq_time_col] - df[seq_std_col]),
+                                df[seq_time_col] + df[seq_std_col],
+                                color="#7f7f7f", alpha=0.18)
+
         if dcel_time_col:
             ax.plot(df["n_vertices"], df[dcel_time_col],
                     marker="s", markersize=7, color="#ff7f0e", linewidth=2.2,
                     label=f"MPolylla DCEL{omp_suffix}")
+            if dcel_std_col and (df[dcel_std_col] > 0).any():
+                ax.fill_between(df["n_vertices"],
+                                np.maximum(0.001, df[dcel_time_col] - df[dcel_std_col]),
+                                df[dcel_time_col] + df[dcel_std_col],
+                                color="#ff7f0e", alpha=0.18)
+
         if data_time_col:
             ax.plot(df["n_vertices"], df[data_time_col],
                     marker="^", markersize=7, color="#1f77b4", linewidth=2.2,
                     label=f"MPolylla Data{omp_suffix}")
+            if data_std_col and (df[data_std_col] > 0).any():
+                ax.fill_between(df["n_vertices"],
+                                np.maximum(0.001, df[data_time_col] - df[data_std_col]),
+                                df[data_time_col] + df[data_std_col],
+                                color="#1f77b4", alpha=0.18)
+
         if task_time_col:
             ax.plot(df["n_vertices"], df[task_time_col],
                     marker="v", markersize=7, color="#9467bd", linewidth=2.2,
                     label=f"MPolylla Task{omp_suffix}")
+            if task_std_col and (df[task_std_col] > 0).any():
+                ax.fill_between(df["n_vertices"],
+                                np.maximum(0.001, df[task_time_col] - df[task_std_col]),
+                                df[task_time_col] + df[task_std_col],
+                                color="#9467bd", alpha=0.18)
+
         ax.plot(df["n_vertices"], df["gpu_time_ms"],
                 marker="o", markersize=8, color="#2ca02c", linewidth=2.5,
                 label="GPolylla")
+        if gpu_std_col and (df[gpu_std_col] > 0).any():
+            ax.fill_between(df["n_vertices"],
+                            np.maximum(0.001, df["gpu_time_ms"] - df[gpu_std_col]),
+                            df["gpu_time_ms"] + df[gpu_std_col],
+                            color="#2ca02c", alpha=0.18)
+
         if log_scale:
             ax.set_yscale("log")
         ax.set_xlabel("Number of Vertices", fontsize=11, fontweight="bold")
@@ -266,7 +325,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
     draw_time_curves(ax, log_scale=False)
     ax.set_ylabel("Execution Time (ms)", fontsize=12, fontweight="bold")
-    ax.set_title(f"Polylla Execution Time (Linear Scale)\nMesh: {mesh_type.capitalize()} (Seed: {seed})", fontsize=13, fontweight="bold", pad=12)
+    ax.set_title(f"Polylla Execution Time (Linear Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
     ax.grid(True, linestyle="--", alpha=0.6)
     ax.legend(fontsize=10, loc="best", framealpha=0.9)
     fig.tight_layout()
@@ -279,7 +338,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
     draw_time_curves(ax, log_scale=True)
     ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=12, fontweight="bold")
-    ax.set_title(f"Polylla Execution Time (Logarithmic Scale)\nMesh: {mesh_type.capitalize()} (Seed: {seed})", fontsize=13, fontweight="bold", pad=12)
+    ax.set_title(f"Polylla Execution Time (Logarithmic Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
     ax.grid(True, which="both", linestyle="--", alpha=0.6)
     ax.legend(fontsize=10, loc="best", framealpha=0.9)
     fig.tight_layout()
@@ -305,18 +364,36 @@ def plot_file(csv_path: Path, output_dir: Path = PLOTS_DIR):
     filename = csv_path.stem
     mesh_type = "uniform"
     seed = 42
+    seeds_info = ""
+    runs = 1
 
     parts = filename.split("_")
     for i, part in enumerate(parts):
         if part in ["uniform", "grid"]:
             mesh_type = part
-        if part.startswith("seed"):
+        if part.startswith("seed") and not part.startswith("seeds"):
             try:
                 seed = int(part[4:])
             except ValueError:
                 pass
 
-    plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=output_dir)
+    if "seeds_" in filename:
+        idx = filename.find("seeds_")
+        if idx != -1:
+            seeds_info = filename[idx + 6:].replace("_", ", ")
+
+    if "runs" in df.columns and pd.notnull(df["runs"].iloc[0]):
+        try:
+            runs = int(float(df["runs"].iloc[0]))
+        except Exception:
+            pass
+    elif "runs_per_seed" in df.columns and pd.notnull(df["runs_per_seed"].iloc[0]):
+        try:
+            runs = int(float(df["runs_per_seed"].iloc[0]))
+        except Exception:
+            pass
+
+    plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=output_dir, seeds_info=seeds_info, runs=runs)
     return True
 
 def main():

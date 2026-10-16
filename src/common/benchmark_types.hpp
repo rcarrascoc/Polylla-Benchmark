@@ -12,6 +12,8 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include <cmath>
+
 inline std::string exec_cmd_safe(const char* cmd) {
     char buffer[256];
     std::string result = "";
@@ -114,6 +116,13 @@ struct PolyllaStats {
     long long memory_total = 0;
     long long memory_total_gpu = 0;
 
+    // Multi-run statistics
+    int runs_count = 1;
+    double time_total_algorithm_std = 0.0;
+    double total_with_copies_std = 0.0;
+    std::vector<double> runs_total_times;
+    std::vector<double> runs_total_with_copies_times;
+
     bool success = false;
     std::string error_message = "";
 
@@ -122,6 +131,95 @@ struct PolyllaStats {
             d_time_to_label_total = d_time_to_label_max_edges + d_time_to_label_frontier_edges + d_time_to_label_seed_edges;
         }
         total_with_copies = d_time_to_generate_polygonal_mesh + d_time_copy_to_device + d_time_to_back_to_host;
+    }
+
+    void aggregate_runs(const std::vector<PolyllaStats>& runs) {
+        if (runs.empty()) return;
+        *this = runs[0];
+        runs_count = static_cast<int>(runs.size());
+        runs_total_times.clear();
+        runs_total_with_copies_times.clear();
+
+        if (runs_count == 1) {
+            runs_total_times.push_back(runs[0].d_time_to_generate_polygonal_mesh);
+            runs_total_with_copies_times.push_back(runs[0].total_with_copies);
+            time_total_algorithm_std = 0.0;
+            total_with_copies_std = 0.0;
+            return;
+        }
+
+        double sum_triangulation = 0.0;
+        double sum_copy_to_device = 0.0;
+        double sum_label_max = 0.0;
+        double sum_label_frontier = 0.0;
+        double sum_label_seed = 0.0;
+        double sum_label_extra = 0.0;
+        double sum_traversal = 0.0;
+        double sum_traversal_search = 0.0;
+        double sum_overwrite_seed = 0.0;
+        double sum_label_scan = 0.0;
+        double sum_label_compaction = 0.0;
+        double sum_label_total = 0.0;
+        double sum_traversal_repair = 0.0;
+        double sum_back_to_host = 0.0;
+        double sum_repair = 0.0;
+        double sum_alg = 0.0;
+        double sum_with_copies = 0.0;
+
+        for (const auto& r : runs) {
+            sum_triangulation += r.time_triangulation_generation;
+            sum_copy_to_device += r.d_time_copy_to_device;
+            sum_label_max += r.d_time_to_label_max_edges;
+            sum_label_frontier += r.d_time_to_label_frontier_edges;
+            sum_label_seed += r.d_time_to_label_seed_edges;
+            sum_label_extra += r.d_time_to_label_extra_frontier_edge;
+            sum_traversal += r.d_time_to_traversal;
+            sum_traversal_search += r.d_time_to_traversal_search_frontier_edge;
+            sum_overwrite_seed += r.d_time_to_overwrite_seed;
+            sum_label_scan += r.d_time_to_label_scan_edges;
+            sum_label_compaction += r.d_time_to_label_compaction_edges;
+            sum_label_total += r.d_time_to_label_total;
+            sum_traversal_repair += r.d_time_to_traversal_and_repair;
+            sum_back_to_host += r.d_time_to_back_to_host;
+            sum_repair += r.d_time_to_repair;
+            sum_alg += r.d_time_to_generate_polygonal_mesh;
+            sum_with_copies += r.total_with_copies;
+
+            runs_total_times.push_back(r.d_time_to_generate_polygonal_mesh);
+            runs_total_with_copies_times.push_back(r.total_with_copies);
+        }
+
+        double inv_n = 1.0 / runs_count;
+        time_triangulation_generation = sum_triangulation * inv_n;
+        d_time_copy_to_device = sum_copy_to_device * inv_n;
+        d_time_to_label_max_edges = sum_label_max * inv_n;
+        d_time_to_label_frontier_edges = sum_label_frontier * inv_n;
+        d_time_to_label_seed_edges = sum_label_seed * inv_n;
+        d_time_to_label_extra_frontier_edge = sum_label_extra * inv_n;
+        d_time_to_traversal = sum_traversal * inv_n;
+        d_time_to_traversal_search_frontier_edge = sum_traversal_search * inv_n;
+        d_time_to_overwrite_seed = sum_overwrite_seed * inv_n;
+        d_time_to_label_scan_edges = sum_label_scan * inv_n;
+        d_time_to_label_compaction_edges = sum_label_compaction * inv_n;
+        d_time_to_label_total = sum_label_total * inv_n;
+        d_time_to_traversal_and_repair = sum_traversal_repair * inv_n;
+        d_time_to_back_to_host = sum_back_to_host * inv_n;
+        d_time_to_repair = sum_repair * inv_n;
+        d_time_to_generate_polygonal_mesh = sum_alg * inv_n;
+        total_with_copies = sum_with_copies * inv_n;
+
+        double var_alg = 0.0;
+        double var_copies = 0.0;
+        for (double t : runs_total_times) {
+            double diff = t - d_time_to_generate_polygonal_mesh;
+            var_alg += diff * diff;
+        }
+        for (double t : runs_total_with_copies_times) {
+            double diff = t - total_with_copies;
+            var_copies += diff * diff;
+        }
+        time_total_algorithm_std = std::sqrt(var_alg / (runs_count - 1));
+        total_with_copies_std = std::sqrt(var_copies / (runs_count - 1));
     }
 
     bool parse_json_file(const std::string& filename) {
@@ -202,6 +300,8 @@ struct BenchmarkComparison {
     std::string mesh_type;
     int requested_size = 0;
     uint64_t seed = 0;
+    int runs = 1;
+    std::vector<uint64_t> seeds_list;
     int cpu_threads = 0;
     std::string cpu_cores_affinity = "all";
     std::vector<int> cpu_cores_list;
@@ -279,8 +379,17 @@ struct BenchmarkComparison {
            << "                                  (Polylla-Mesh-DCEL vs MPolylla DCEL vs MPolylla Data vs MPolylla Task vs GPolylla)                                    \n"
            << "==========================================================================================================================================================\n";
         os << "  Mesh Type:       " << mesh_type << "\n"
-           << "  Requested Size:  " << requested_size << "\n"
-           << "  Random Seed:     " << seed << "\n"
+           << "  Requested Size:  " << requested_size << "\n";
+        if (seeds_list.size() > 1) {
+            os << "  Random Seeds:    [";
+            for (size_t i = 0; i < seeds_list.size(); ++i) {
+                os << seeds_list[i] << (i + 1 < seeds_list.size() ? ", " : "");
+            }
+            os << "]\n";
+        } else {
+            os << "  Random Seed:     " << seed << "\n";
+        }
+        os << "  Repetitions:     " << runs << (runs > 1 ? " runs (averaged)" : " run") << "\n"
            << "  CPU Threads:     " << cpu_threads << "\n"
            << "  CPU Cores/Aff:   " << cpu_cores_affinity << "\n"
            << "  Mesh Gen Time:   " << std::fixed << std::setprecision(3) << mesh_gen_time_ms << " ms\n"
@@ -307,9 +416,15 @@ struct BenchmarkComparison {
         print_elem("Half-Edges (n_half_edges)", seq_stats.n_half_edges, dcel_stats.n_half_edges, cpu_stats.n_half_edges, task_stats.n_half_edges, gpu_stats.n_half_edges);
         print_elem("Polygons (n_polygons)", seq_stats.n_polygons, dcel_stats.n_polygons, cpu_stats.n_polygons, task_stats.n_polygons, gpu_stats.n_polygons);
 
-        os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
-           << "  Phase Timers (ms)            Polylla-Mesh-DCEL    MPolylla DCEL    MPolylla Data    MPolylla Task        GPolylla       Speedup GPolylla/Base       \n"
-           << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
+        if (runs > 1) {
+            os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+               << "  Phase Timers (ms, avg " << runs << " runs)  Polylla-Mesh-DCEL    MPolylla DCEL    MPolylla Data    MPolylla Task        GPolylla       Speedup GPolylla/Base       \n"
+               << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
+        } else {
+            os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+               << "  Phase Timers (ms)            Polylla-Mesh-DCEL    MPolylla DCEL    MPolylla Data    MPolylla Task        GPolylla       Speedup GPolylla/Base       \n"
+               << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
+        }
 
         auto print_timer = [&](const char* name, double seq_t, double dcel_t, double omp_t, double task_t, double gpu_t) {
             double sp_gpu_seq = (has_seq && gpu_t > 0.0) ? (seq_t / gpu_t) : 0.0;
@@ -341,10 +456,28 @@ struct BenchmarkComparison {
 
         os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         print_timer("TOTAL ALGORITHM TIME", seq_stats.d_time_to_generate_polygonal_mesh, dcel_stats.d_time_to_generate_polygonal_mesh, cpu_stats.d_time_to_generate_polygonal_mesh, task_stats.d_time_to_generate_polygonal_mesh, gpu_stats.d_time_to_generate_polygonal_mesh);
+        if (runs > 1) {
+            auto format_std_str = [](double val) {
+                std::ostringstream ss;
+                ss << "± " << std::fixed << std::setprecision(4) << val;
+                return ss.str();
+            };
+            os << "  " << std::left << std::setw(25) << "  Std Dev (± ms)"
+               << "  " << std::right << std::setw(17) << (has_seq ? format_std_str(seq_stats.time_total_algorithm_std) : "-")
+               << "  " << std::right << std::setw(15) << (has_dcel ? format_std_str(dcel_stats.time_total_algorithm_std) : "-")
+               << "  " << std::right << std::setw(15) << format_std_str(cpu_stats.time_total_algorithm_std)
+               << "  " << std::right << std::setw(15) << (has_task ? format_std_str(task_stats.time_total_algorithm_std) : "-")
+               << "  " << std::right << std::setw(14) << format_std_str(gpu_stats.time_total_algorithm_std)
+               << "  " << std::right << std::setw(25) << "-\n";
+        }
         os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         os << "  GPU Transfer Host->Device:      " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.d_time_copy_to_device << " ms\n";
         os << "  GPU Transfer Device->Host:      " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.d_time_to_back_to_host << " ms\n";
-        os << "  GPU TOTAL (Alg + Transfers):    " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.total_with_copies << " ms\n";
+        os << "  GPU TOTAL (Alg + Transfers):    " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.total_with_copies << " ms";
+        if (runs > 1) {
+            os << "  (± " << std::fixed << std::setprecision(4) << gpu_stats.total_with_copies_std << " ms)";
+        }
+        os << "\n";
         os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         std::string c_unit = (cpu_threads == 1 ? "core" : "cores");
         std::string omp_c_str = "(" + std::to_string(cpu_threads) + " " + c_unit + ")";
@@ -405,14 +538,22 @@ struct BenchmarkComparison {
             << "[3] EXPERIMENT PARAMETERS\n"
             << "--------------------------------------------------------------------------------------------------------------------------------------\n"
             << "  Mesh Type:            " << mesh_type << "\n"
-            << "  Requested Vertices:   " << requested_size << "\n"
-            << "  Random Seed:          " << seed << "\n"
+            << "  Requested Vertices:   " << requested_size << "\n";
+        if (seeds_list.size() > 1) {
+            out << "  Random Seeds:         [";
+            for (size_t i = 0; i < seeds_list.size(); ++i) {
+                out << seeds_list[i] << (i + 1 < seeds_list.size() ? ", " : "");
+            }
+            out << "]\n";
+        } else {
+            out << "  Random Seed:          " << seed << "\n";
+        }
+        out << "  Repetitions:          " << runs << (runs > 1 ? " runs (averaged)" : " run") << "\n"
             << "  CPU OpenMP Threads:   " << cpu_threads << "\n"
             << "  CPU Core Affinity:    " << cpu_cores_affinity << "\n"
             << "  Mesh Gen Time (RAM):  " << std::fixed << std::setprecision(3) << mesh_gen_time_ms << " ms\n"
             << "  RAM Buffer Write:     " << std::fixed << std::setprecision(3) << off_write_time_ms << " ms\n\n";
 
-        // Call print_table on out stream
         print_table(out);
 
         out << "[4] DETAILED MEMORY FOOTPRINT\n"
@@ -427,6 +568,7 @@ struct BenchmarkComparison {
             << "--------------------------------------------------------------------------------------------------------------------------------------\n"
             << "  To reproduce this exact experiment with the same input mesh, execute:\n"
             << "  ./run_benchmark.sh --type " << mesh_type << " --size " << requested_size << " --seed " << seed;
+        if (runs > 1) out << " --runs " << runs;
         if (cpu_threads > 0) out << " --threads " << cpu_threads;
         if (!cpu_cores_affinity.empty() && cpu_cores_affinity.find("all") == std::string::npos) {
             out << " --cores \"" << cpu_cores_affinity << "\"";
@@ -464,7 +606,15 @@ struct BenchmarkComparison {
             << "  \"mesh_type\": \"" << mesh_type << "\",\n"
             << "  \"requested_size\": " << requested_size << ",\n"
             << "  \"seed\": " << seed << ",\n"
-            << "  \"cpu_threads\": " << cpu_threads << ",\n"
+            << "  \"runs\": " << runs << ",\n";
+        if (seeds_list.size() > 1) {
+            out << "  \"seeds\": [";
+            for (size_t i = 0; i < seeds_list.size(); ++i) {
+                out << seeds_list[i] << (i + 1 < seeds_list.size() ? ", " : "");
+            }
+            out << "],\n";
+        }
+        out << "  \"cpu_threads\": " << cpu_threads << ",\n"
             << "  \"cpu_cores_affinity\": \"" << cpu_cores_affinity << "\",\n"
             << "  \"mesh_gen_time_ms\": " << mesh_gen_time_ms << ",\n"
             << "  \"off_write_time_ms\": " << off_write_time_ms << ",\n"
@@ -484,20 +634,32 @@ struct BenchmarkComparison {
             << "  \"speedup_omp_task_vs_omp_data\": " << speedup_task_vs_omp << ",\n"
             << "  \"speedup_omp_task_vs_omp\": " << speedup_task_vs_omp << ",\n";
 
+        auto write_runs_array = [&](std::ostream& s, const std::vector<double>& arr) {
+            s << "[";
+            for (size_t i = 0; i < arr.size(); ++i) {
+                s << std::fixed << std::setprecision(4) << arr[i] << (i + 1 < arr.size() ? ", " : "");
+            }
+            s << "]";
+        };
+
         if (has_seq) {
             out << "  \"sequential\": {\n"
                 << "    \"n_vertices\": " << seq_stats.n_vertices << ",\n"
                 << "    \"n_faces\": " << seq_stats.n_faces << ",\n"
                 << "    \"n_half_edges\": " << seq_stats.n_half_edges << ",\n"
                 << "    \"n_polygons\": " << seq_stats.n_polygons << ",\n"
+                << "    \"runs\": " << seq_stats.runs_count << ",\n"
                 << "    \"time_triangulation_generation\": " << seq_stats.time_triangulation_generation << ",\n"
                 << "    \"time_label_max_edges\": " << seq_stats.d_time_to_label_max_edges << ",\n"
                 << "    \"time_label_frontier_edges\": " << seq_stats.d_time_to_label_frontier_edges << ",\n"
                 << "    \"time_label_seed_edges\": " << seq_stats.d_time_to_label_seed_edges << ",\n"
                 << "    \"time_traversal\": " << seq_stats.d_time_to_traversal << ",\n"
                 << "    \"time_repair\": " << seq_stats.d_time_to_repair << ",\n"
-                << "    \"time_total_algorithm\": " << seq_stats.d_time_to_generate_polygonal_mesh << "\n"
-                << "  },\n";
+                << "    \"time_total_algorithm\": " << seq_stats.d_time_to_generate_polygonal_mesh << ",\n"
+                << "    \"time_total_algorithm_std\": " << seq_stats.time_total_algorithm_std << ",\n"
+                << "    \"time_total_algorithm_runs\": ";
+            write_runs_array(out, seq_stats.runs_total_times);
+            out << "\n  },\n";
         }
 
         if (has_dcel) {
@@ -506,14 +668,18 @@ struct BenchmarkComparison {
                 << "    \"n_faces\": " << dcel_stats.n_faces << ",\n"
                 << "    \"n_half_edges\": " << dcel_stats.n_half_edges << ",\n"
                 << "    \"n_polygons\": " << dcel_stats.n_polygons << ",\n"
+                << "    \"runs\": " << dcel_stats.runs_count << ",\n"
                 << "    \"time_triangulation_generation\": " << dcel_stats.time_triangulation_generation << ",\n"
                 << "    \"time_label_max_edges\": " << dcel_stats.d_time_to_label_max_edges << ",\n"
                 << "    \"time_label_frontier_edges\": " << dcel_stats.d_time_to_label_frontier_edges << ",\n"
                 << "    \"time_label_seed_edges\": " << dcel_stats.d_time_to_label_seed_edges << ",\n"
                 << "    \"time_traversal\": " << dcel_stats.d_time_to_traversal << ",\n"
                 << "    \"time_repair\": " << dcel_stats.d_time_to_repair << ",\n"
-                << "    \"time_total_algorithm\": " << dcel_stats.d_time_to_generate_polygonal_mesh << "\n"
-                << "  },\n";
+                << "    \"time_total_algorithm\": " << dcel_stats.d_time_to_generate_polygonal_mesh << ",\n"
+                << "    \"time_total_algorithm_std\": " << dcel_stats.time_total_algorithm_std << ",\n"
+                << "    \"time_total_algorithm_runs\": ";
+            write_runs_array(out, dcel_stats.runs_total_times);
+            out << "\n  },\n";
         }
 
         out << "  \"cpu_data\": {\n"
@@ -521,6 +687,7 @@ struct BenchmarkComparison {
             << "    \"n_faces\": " << cpu_stats.n_faces << ",\n"
             << "    \"n_half_edges\": " << cpu_stats.n_half_edges << ",\n"
             << "    \"n_polygons\": " << cpu_stats.n_polygons << ",\n"
+            << "    \"runs\": " << cpu_stats.runs_count << ",\n"
             << "    \"time_triangulation_generation\": " << cpu_stats.time_triangulation_generation << ",\n"
             << "    \"time_label_max_edges\": " << cpu_stats.d_time_to_label_max_edges << ",\n"
             << "    \"time_label_frontier_edges\": " << cpu_stats.d_time_to_label_frontier_edges << ",\n"
@@ -531,8 +698,11 @@ struct BenchmarkComparison {
             << "    \"time_overwrite_seed\": " << cpu_stats.d_time_to_overwrite_seed << ",\n"
             << "    \"time_label_scan_edges\": " << cpu_stats.d_time_to_label_scan_edges << ",\n"
             << "    \"time_label_compaction_edges\": " << cpu_stats.d_time_to_label_compaction_edges << ",\n"
-            << "    \"time_total_algorithm\": " << cpu_stats.d_time_to_generate_polygonal_mesh << "\n"
-            << "  },\n";
+            << "    \"time_total_algorithm\": " << cpu_stats.d_time_to_generate_polygonal_mesh << ",\n"
+            << "    \"time_total_algorithm_std\": " << cpu_stats.time_total_algorithm_std << ",\n"
+            << "    \"time_total_algorithm_runs\": ";
+        write_runs_array(out, cpu_stats.runs_total_times);
+        out << "\n  },\n";
 
         if (has_task) {
             out << "  \"cpu_tasks\": {\n"
@@ -540,6 +710,7 @@ struct BenchmarkComparison {
                 << "    \"n_faces\": " << task_stats.n_faces << ",\n"
                 << "    \"n_half_edges\": " << task_stats.n_half_edges << ",\n"
                 << "    \"n_polygons\": " << task_stats.n_polygons << ",\n"
+                << "    \"runs\": " << task_stats.runs_count << ",\n"
                 << "    \"time_triangulation_generation\": " << task_stats.time_triangulation_generation << ",\n"
                 << "    \"time_label_max_edges\": " << task_stats.d_time_to_label_max_edges << ",\n"
                 << "    \"time_label_frontier_edges\": " << task_stats.d_time_to_label_frontier_edges << ",\n"
@@ -550,8 +721,11 @@ struct BenchmarkComparison {
                 << "    \"time_overwrite_seed\": " << task_stats.d_time_to_overwrite_seed << ",\n"
                 << "    \"time_label_scan_edges\": " << task_stats.d_time_to_label_scan_edges << ",\n"
                 << "    \"time_label_compaction_edges\": " << task_stats.d_time_to_label_compaction_edges << ",\n"
-                << "    \"time_total_algorithm\": " << task_stats.d_time_to_generate_polygonal_mesh << "\n"
-                << "  },\n";
+                << "    \"time_total_algorithm\": " << task_stats.d_time_to_generate_polygonal_mesh << ",\n"
+                << "    \"time_total_algorithm_std\": " << task_stats.time_total_algorithm_std << ",\n"
+                << "    \"time_total_algorithm_runs\": ";
+            write_runs_array(out, task_stats.runs_total_times);
+            out << "\n  },\n";
         }
 
         out << "  \"gpu\": {\n"
@@ -559,6 +733,7 @@ struct BenchmarkComparison {
             << "    \"n_faces\": " << gpu_stats.n_faces << ",\n"
             << "    \"n_half_edges\": " << gpu_stats.n_half_edges << ",\n"
             << "    \"n_polygons\": " << gpu_stats.n_polygons << ",\n"
+            << "    \"runs\": " << gpu_stats.runs_count << ",\n"
             << "    \"time_triangulation_generation\": " << gpu_stats.time_triangulation_generation << ",\n"
             << "    \"time_copy_to_device\": " << gpu_stats.d_time_copy_to_device << ",\n"
             << "    \"time_label_max_edges\": " << gpu_stats.d_time_to_label_max_edges << ",\n"
@@ -572,11 +747,273 @@ struct BenchmarkComparison {
             << "    \"time_label_compaction_edges\": " << gpu_stats.d_time_to_label_compaction_edges << ",\n"
             << "    \"time_back_to_host\": " << gpu_stats.d_time_to_back_to_host << ",\n"
             << "    \"time_total_algorithm\": " << gpu_stats.d_time_to_generate_polygonal_mesh << ",\n"
+            << "    \"time_total_algorithm_std\": " << gpu_stats.time_total_algorithm_std << ",\n"
+            << "    \"time_total_algorithm_runs\": ";
+        write_runs_array(out, gpu_stats.runs_total_times);
+        out << ",\n"
             << "    \"time_total_with_copies\": " << gpu_stats.total_with_copies << ",\n"
+            << "    \"time_total_with_copies_std\": " << gpu_stats.total_with_copies_std << ",\n"
+            << "    \"time_total_with_copies_runs\": ";
+        write_runs_array(out, gpu_stats.runs_total_with_copies_times);
+        out << ",\n"
             << "    \"memory_total_gpu\": " << gpu_stats.memory_total_gpu << "\n"
             << "  }\n"
             << "}\n";
         out.close();
         std::cout << "[Report] Saved JSON benchmark results to: " << filepath << std::endl;
+    }
+};
+
+struct MultiSeedSummary {
+    std::string mesh_type;
+    int requested_size = 0;
+    std::vector<uint64_t> seeds;
+    int runs_per_seed = 1;
+    int cpu_threads = 0;
+    std::string cpu_cores_affinity;
+
+    std::vector<BenchmarkComparison> comparisons;
+
+    double mean_n_vertices = 0.0;
+    double mean_n_faces = 0.0;
+    double mean_n_polygons = 0.0;
+
+    double mean_seq_time = 0.0;
+    double std_seq_time = 0.0;
+    double mean_dcel_time = 0.0;
+    double std_dcel_time = 0.0;
+    double mean_omp_time = 0.0;
+    double std_omp_time = 0.0;
+    double mean_task_time = 0.0;
+    double std_task_time = 0.0;
+    double mean_gpu_time = 0.0;
+    double std_gpu_time = 0.0;
+    double mean_gpu_with_copies_time = 0.0;
+    double std_gpu_with_copies_time = 0.0;
+
+    bool has_seq = false;
+    bool has_dcel = false;
+    bool has_task = false;
+
+    double speedup_gpu_vs_seq = 0.0;
+    double speedup_dcel_vs_seq = 0.0;
+    double speedup_omp_vs_seq = 0.0;
+    double speedup_task_vs_seq = 0.0;
+    double speedup_gpu_with_copies_vs_seq = 0.0;
+    double speedup_gpu_vs_dcel = 0.0;
+    double speedup_gpu_vs_omp = 0.0;
+    double speedup_gpu_vs_task = 0.0;
+    double speedup_task_vs_omp = 0.0;
+
+    void compute() {
+        if (comparisons.empty()) return;
+        int n = static_cast<int>(comparisons.size());
+        has_seq = comparisons[0].has_seq;
+        has_dcel = comparisons[0].has_dcel;
+        has_task = comparisons[0].has_task;
+        mesh_type = comparisons[0].mesh_type;
+        requested_size = comparisons[0].requested_size;
+        cpu_threads = comparisons[0].cpu_threads;
+        cpu_cores_affinity = comparisons[0].cpu_cores_affinity;
+        runs_per_seed = comparisons[0].runs;
+
+        seeds.clear();
+        double sum_v = 0, sum_f = 0, sum_p = 0;
+        double sum_seq = 0, sum_dcel = 0, sum_omp = 0, sum_task = 0, sum_gpu = 0, sum_gpu_cp = 0;
+        for (const auto& c : comparisons) {
+            seeds.push_back(c.seed);
+            sum_v += c.gpu_stats.n_vertices;
+            sum_f += c.gpu_stats.n_faces;
+            sum_p += c.gpu_stats.n_polygons;
+            if (has_seq) sum_seq += c.seq_stats.d_time_to_generate_polygonal_mesh;
+            if (has_dcel) sum_dcel += c.dcel_stats.d_time_to_generate_polygonal_mesh;
+            sum_omp += c.cpu_stats.d_time_to_generate_polygonal_mesh;
+            if (has_task) sum_task += c.task_stats.d_time_to_generate_polygonal_mesh;
+            sum_gpu += c.gpu_stats.d_time_to_generate_polygonal_mesh;
+            sum_gpu_cp += c.gpu_stats.total_with_copies;
+        }
+        mean_n_vertices = sum_v / n;
+        mean_n_faces = sum_f / n;
+        mean_n_polygons = sum_p / n;
+        mean_seq_time = sum_seq / n;
+        mean_dcel_time = sum_dcel / n;
+        mean_omp_time = sum_omp / n;
+        mean_task_time = sum_task / n;
+        mean_gpu_time = sum_gpu / n;
+        mean_gpu_with_copies_time = sum_gpu_cp / n;
+
+        if (n > 1) {
+            double var_seq = 0, var_dcel = 0, var_omp = 0, var_task = 0, var_gpu = 0, var_gpu_cp = 0;
+            for (const auto& c : comparisons) {
+                if (has_seq) { double d = c.seq_stats.d_time_to_generate_polygonal_mesh - mean_seq_time; var_seq += d * d; }
+                if (has_dcel) { double d = c.dcel_stats.d_time_to_generate_polygonal_mesh - mean_dcel_time; var_dcel += d * d; }
+                { double d = c.cpu_stats.d_time_to_generate_polygonal_mesh - mean_omp_time; var_omp += d * d; }
+                if (has_task) { double d = c.task_stats.d_time_to_generate_polygonal_mesh - mean_task_time; var_task += d * d; }
+                { double d = c.gpu_stats.d_time_to_generate_polygonal_mesh - mean_gpu_time; var_gpu += d * d; }
+                { double d = c.gpu_stats.total_with_copies - mean_gpu_with_copies_time; var_gpu_cp += d * d; }
+            }
+            std_seq_time = std::sqrt(var_seq / (n - 1));
+            std_dcel_time = std::sqrt(var_dcel / (n - 1));
+            std_omp_time = std::sqrt(var_omp / (n - 1));
+            std_task_time = std::sqrt(var_task / (n - 1));
+            std_gpu_time = std::sqrt(var_gpu / (n - 1));
+            std_gpu_with_copies_time = std::sqrt(var_gpu_cp / (n - 1));
+        }
+
+        if (has_seq && mean_seq_time > 0.0) {
+            if (mean_gpu_time > 0.0) speedup_gpu_vs_seq = mean_seq_time / mean_gpu_time;
+            if (has_dcel && mean_dcel_time > 0.0) speedup_dcel_vs_seq = mean_seq_time / mean_dcel_time;
+            if (mean_omp_time > 0.0) speedup_omp_vs_seq = mean_seq_time / mean_omp_time;
+            if (has_task && mean_task_time > 0.0) speedup_task_vs_seq = mean_seq_time / mean_task_time;
+            if (mean_gpu_with_copies_time > 0.0) speedup_gpu_with_copies_vs_seq = mean_seq_time / mean_gpu_with_copies_time;
+        }
+        if (mean_gpu_time > 0.0) {
+            if (has_dcel && mean_dcel_time > 0.0) speedup_gpu_vs_dcel = mean_dcel_time / mean_gpu_time;
+            if (mean_omp_time > 0.0) speedup_gpu_vs_omp = mean_omp_time / mean_gpu_time;
+            if (has_task && mean_task_time > 0.0) speedup_gpu_vs_task = mean_task_time / mean_gpu_time;
+        }
+        if (has_task && mean_task_time > 0.0 && mean_omp_time > 0.0) {
+            speedup_task_vs_omp = mean_omp_time / mean_task_time;
+        }
+    }
+
+    void print_table(std::ostream& os = std::cout) const {
+        os << "\n"
+           << "==========================================================================================================================================================\n"
+           << "                                                      MULTI-SEED BENCHMARK SUMMARY REPORT                                                                 \n"
+           << "                                  (Polylla-Mesh-DCEL vs MPolylla DCEL vs MPolylla Data vs MPolylla Task vs GPolylla)                                    \n"
+           << "==========================================================================================================================================================\n";
+        os << "  Mesh Type:       " << mesh_type << "\n"
+           << "  Requested Size:  " << requested_size << "\n"
+           << "  Seeds Tested (" << seeds.size() << "): [";
+        for (size_t i = 0; i < seeds.size(); ++i) {
+            os << seeds[i] << (i + 1 < seeds.size() ? ", " : "");
+        }
+        os << "]\n"
+           << "  Runs / Seed:     " << runs_per_seed << (runs_per_seed > 1 ? " runs" : " run") << "\n"
+           << "  CPU Threads:     " << cpu_threads << "\n"
+           << "  CPU Cores/Aff:   " << cpu_cores_affinity << "\n"
+           << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+           << "  Seed       | Vertices | Faces    | Polylla-Mesh-DCEL | MPolylla DCEL   | MPolylla Data   | MPolylla Task   | GPolylla (ms)   | Speedup GPU/Base     \n"
+           << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
+
+        for (const auto& c : comparisons) {
+            std::string s_seq = has_seq ? (std::to_string(c.seq_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms") : "-";
+            std::string s_dcel = has_dcel ? (std::to_string(c.dcel_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms") : "-";
+            std::string s_omp = std::to_string(c.cpu_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms";
+            std::string s_task = has_task ? (std::to_string(c.task_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms") : "-";
+            std::string s_gpu = std::to_string(c.gpu_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms";
+            std::string s_sp = (c.speedup_gpu_vs_seq > 0.0) ? (std::to_string(c.speedup_gpu_vs_seq).substr(0, 5) + "x") : "-";
+
+            os << "  " << std::left << std::setw(10) << c.seed << " | "
+               << std::right << std::setw(8) << c.gpu_stats.n_vertices << " | "
+               << std::right << std::setw(8) << c.gpu_stats.n_faces << " | "
+               << std::right << std::setw(17) << s_seq << " | "
+               << std::right << std::setw(15) << s_dcel << " | "
+               << std::right << std::setw(15) << s_omp << " | "
+               << std::right << std::setw(15) << s_task << " | "
+               << std::right << std::setw(15) << s_gpu << " | "
+               << std::right << std::setw(20) << s_sp << "\n";
+        }
+        os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
+        auto fmt_mean_std = [](double mean, double std, bool valid) -> std::string {
+            if (!valid) return "-";
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(2) << mean << " ± " << std::setprecision(2) << std << " ms";
+            return ss.str();
+        };
+
+        std::string m_seq = fmt_mean_std(mean_seq_time, std_seq_time, has_seq);
+        std::string m_dcel = fmt_mean_std(mean_dcel_time, std_dcel_time, has_dcel);
+        std::string m_omp = fmt_mean_std(mean_omp_time, std_omp_time, true);
+        std::string m_task = fmt_mean_std(mean_task_time, std_task_time, has_task);
+        std::string m_gpu = fmt_mean_std(mean_gpu_time, std_gpu_time, true);
+        std::string m_sp = (speedup_gpu_vs_seq > 0.0) ? (std::to_string(speedup_gpu_vs_seq).substr(0, 5) + "x") : "-";
+
+        os << "  " << std::left << std::setw(10) << "MEAN (Avg)" << " | "
+           << std::right << std::setw(8) << static_cast<long long>(std::round(mean_n_vertices)) << " | "
+           << std::right << std::setw(8) << static_cast<long long>(std::round(mean_n_faces)) << " | "
+           << std::right << std::setw(17) << m_seq << " | "
+           << std::right << std::setw(15) << m_dcel << " | "
+           << std::right << std::setw(15) << m_omp << " | "
+           << std::right << std::setw(15) << m_task << " | "
+           << std::right << std::setw(15) << m_gpu << " | "
+           << std::right << std::setw(20) << m_sp << "\n";
+
+        os << "==========================================================================================================================================================\n";
+        std::string c_unit = (cpu_threads == 1 ? "core" : "cores");
+        std::string omp_c_str = "(" + std::to_string(cpu_threads) + " " + c_unit + ")";
+        if (has_seq) {
+            os << "  >>> SPEEDUP GPolylla vs Polylla-Mesh-DCEL (Alg only):         " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_seq << "x\n";
+            os << "  >>> SPEEDUP GPolylla vs Polylla-Mesh-DCEL (With Transfers):   " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_with_copies_vs_seq << "x\n";
+            if (has_dcel) {
+                os << "  >>> SPEEDUP MPolylla DCEL " << std::left << std::setw(11) << omp_c_str << " vs Polylla-Mesh-DCEL:       " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_dcel_vs_seq << "x\n";
+            }
+            os << "  >>> SPEEDUP MPolylla Data " << std::left << std::setw(11) << omp_c_str << " vs Polylla-Mesh-DCEL:       " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_omp_vs_seq << "x\n";
+            if (has_task) {
+                os << "  >>> SPEEDUP MPolylla Task " << std::left << std::setw(11) << omp_c_str << " vs Polylla-Mesh-DCEL:       " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_seq << "x\n";
+            }
+        }
+        if (has_dcel) {
+            os << "  >>> SPEEDUP GPolylla vs MPolylla DCEL " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_dcel << "x\n";
+        }
+        os << "  >>> SPEEDUP GPolylla vs MPolylla Data " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_omp << "x\n";
+        if (has_task) {
+            os << "  >>> SPEEDUP GPolylla vs MPolylla Task " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_task << "x\n";
+            os << "  >>> SPEEDUP MPolylla Task vs MPolylla Data " << std::left << std::setw(11) << omp_c_str << ":           " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_omp << "x\n";
+        }
+        os << "==========================================================================================================================================================\n\n";
+    }
+
+    void save_txt(const std::string& filepath) const {
+        std::ofstream out(filepath);
+        if (!out.is_open()) return;
+        out << "======================================================================================================================================\n"
+            << "                                            POLYLLA MULTI-SEED BENCHMARK REPORT\n"
+            << "======================================================================================================================================\n\n";
+        print_table(out);
+        out.close();
+        std::cout << "[Report] Saved Multi-Seed TXT summary to: " << filepath << std::endl;
+    }
+
+    void save_json(const std::string& filepath) const {
+        std::ofstream out(filepath);
+        if (!out.is_open()) return;
+        out << "{\n"
+            << "  \"mesh_type\": \"" << mesh_type << "\",\n"
+            << "  \"requested_size\": " << requested_size << ",\n"
+            << "  \"runs_per_seed\": " << runs_per_seed << ",\n"
+            << "  \"seeds\": [";
+        for (size_t i = 0; i < seeds.size(); ++i) {
+            out << seeds[i] << (i + 1 < seeds.size() ? ", " : "");
+        }
+        out << "],\n"
+            << "  \"cpu_threads\": " << cpu_threads << ",\n"
+            << "  \"cpu_cores_affinity\": \"" << cpu_cores_affinity << "\",\n"
+            << "  \"mean_n_vertices\": " << mean_n_vertices << ",\n"
+            << "  \"mean_n_faces\": " << mean_n_faces << ",\n"
+            << "  \"mean_n_polygons\": " << mean_n_polygons << ",\n"
+            << "  \"has_sequential_baseline\": " << (has_seq ? "true" : "false") << ",\n"
+            << "  \"has_omp_dcel\": " << (has_dcel ? "true" : "false") << ",\n"
+            << "  \"has_omp_task\": " << (has_task ? "true" : "false") << ",\n"
+            << "  \"seq_time_ms_mean\": " << mean_seq_time << ",\n"
+            << "  \"seq_time_ms_std\": " << std_seq_time << ",\n"
+            << "  \"omp_dcel_time_ms_mean\": " << mean_dcel_time << ",\n"
+            << "  \"omp_dcel_time_ms_std\": " << std_dcel_time << ",\n"
+            << "  \"omp_data_time_ms_mean\": " << mean_omp_time << ",\n"
+            << "  \"omp_data_time_ms_std\": " << std_omp_time << ",\n"
+            << "  \"omp_task_time_ms_mean\": " << mean_task_time << ",\n"
+            << "  \"omp_task_time_ms_std\": " << std_task_time << ",\n"
+            << "  \"gpu_time_ms_mean\": " << mean_gpu_time << ",\n"
+            << "  \"gpu_time_ms_std\": " << std_gpu_time << ",\n"
+            << "  \"gpu_total_with_copies_ms_mean\": " << mean_gpu_with_copies_time << ",\n"
+            << "  \"gpu_total_with_copies_ms_std\": " << std_gpu_with_copies_time << ",\n"
+            << "  \"speedup_gpu_vs_seq\": " << speedup_gpu_vs_seq << ",\n"
+            << "  \"speedup_dcel_vs_seq\": " << speedup_dcel_vs_seq << ",\n"
+            << "  \"speedup_data_vs_seq\": " << speedup_omp_vs_seq << ",\n"
+            << "  \"speedup_task_vs_seq\": " << speedup_task_vs_seq << "\n"
+            << "}\n";
+        out.close();
+        std::cout << "[Report] Saved Multi-Seed JSON summary to: " << filepath << std::endl;
     }
 };
