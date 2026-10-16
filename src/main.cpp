@@ -12,6 +12,7 @@
 #include "src/generators/mesh_generator.hpp"
 #include "src/runners/seq_runner.hpp"
 #include "src/runners/gpu_runner.hpp"
+#include "src/runners/cpu_dcel_runner.hpp"
 #include "src/runners/cpu_runner.hpp"
 #include "src/runners/cpu_task_runner.hpp"
 
@@ -178,6 +179,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::string tmp_seq_json = "/dev/shm/seq_stats_" + std::to_string(getpid()) + ".json";
+    std::string tmp_dcel_json = "/dev/shm/dcel_stats_" + std::to_string(getpid()) + ".json";
     std::string tmp_cpu_json = "/dev/shm/cpu_stats_" + std::to_string(getpid()) + ".json";
     std::string tmp_task_json = "/dev/shm/task_stats_" + std::to_string(getpid()) + ".json";
     std::string tmp_gpu_json = "/dev/shm/gpu_stats_" + std::to_string(getpid()) + ".json";
@@ -185,7 +187,7 @@ int main(int argc, char* argv[]) {
     // 1. Sequential Baseline
     if (run_sequential) {
         std::cout << "\n------------------------------------------------------------------------\n"
-                  << "  [1/4] RUNNING SEQUENTIAL BASELINE (ssalinasfe/Polylla-Mesh-DCEL)\n"
+                  << "  [1/5] RUNNING SEQUENTIAL BASELINE (ssalinasfe/Polylla-Mesh-DCEL)\n"
                   << "------------------------------------------------------------------------\n";
         bool seq_ok = run_seq_polylla_from_off(test_off_file.c_str(), tmp_seq_json.c_str(), &comp.seq_stats);
         comp.has_seq = seq_ok;
@@ -197,9 +199,23 @@ int main(int argc, char* argv[]) {
         comp.has_seq = false;
     }
 
-    // 2. OpenMP CPU (Data - main branch)
+    // 2. OpenMP CPU (DCEL - rcarrascoc/MPolylla-Mesh-DCEL)
     std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [2/4] RUNNING CPU MULTI-CORE DATA (rcarrascoc/MPolylla - main)\n"
+              << "  [2/5] RUNNING CPU MULTI-CORE DCEL (rcarrascoc/MPolylla-Mesh-DCEL)\n"
+              << "------------------------------------------------------------------------\n";
+    bool dcel_ok = false;
+    {
+        ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
+        dcel_ok = run_mpolylla_dcel_from_off(test_off_file.c_str(), tmp_dcel_json.c_str(), comp.cpu_threads, &comp.dcel_stats);
+    }
+    comp.has_dcel = dcel_ok;
+    if (!dcel_ok) {
+        std::cerr << "Warning: CPU DCEL benchmark failed! Message: " << comp.dcel_stats.error_message << std::endl;
+    }
+
+    // 3. OpenMP CPU (Data - main branch)
+    std::cout << "\n------------------------------------------------------------------------\n"
+              << "  [3/5] RUNNING CPU MULTI-CORE DATA (rcarrascoc/MPolylla - main)\n"
               << "------------------------------------------------------------------------\n";
     bool cpu_ok = false;
     {
@@ -210,9 +226,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Warning: CPU Data benchmark failed! Message: " << comp.cpu_stats.error_message << std::endl;
     }
 
-    // 3. OpenMP CPU (Tasks - Task branch)
+    // 4. OpenMP CPU (Tasks - Task branch)
     std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [3/4] RUNNING CPU MULTI-CORE TASKS (rcarrascoc/MPolylla - Task)\n"
+              << "  [4/5] RUNNING CPU MULTI-CORE TASKS (rcarrascoc/MPolylla - Task)\n"
               << "------------------------------------------------------------------------\n";
     bool task_ok = false;
     {
@@ -224,9 +240,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Warning: CPU Tasks benchmark failed! Message: " << comp.task_stats.error_message << std::endl;
     }
 
-    // 4. GPU CUDA
+    // 5. GPU CUDA
     std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [4/4] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla - CUDA)\n"
+              << "  [5/5] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla - CUDA)\n"
               << "------------------------------------------------------------------------\n";
     bool gpu_ok = run_gpolylla_from_off(test_off_file.c_str(), tmp_gpu_json.c_str(), &comp.gpu_stats);
     if (!gpu_ok) {
@@ -238,6 +254,7 @@ int main(int argc, char* argv[]) {
         std::remove(test_off_file.c_str());
     }
     std::remove(tmp_seq_json.c_str());
+    std::remove(tmp_dcel_json.c_str());
     std::remove(tmp_cpu_json.c_str());
     std::remove(tmp_task_json.c_str());
     std::remove(tmp_gpu_json.c_str());

@@ -11,3 +11,6 @@
 	path = submodules/MPolylla-Task
 	url = https://github.com/rcarrascoc/MPolylla.git
 	branch = Task
+[submodule "submodules/MPolylla-Mesh-DCEL"]
+	path = submodules/MPolylla-Mesh-DCEL
+	url = https://github.com/rcarrascoc/MPolylla-Mesh-DCEL.git

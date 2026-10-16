@@ -10,7 +10,7 @@ BUILD_DIR="${SCRIPT_DIR}/build"
 BINARY="${BUILD_DIR}/ppolylla_benchmark"
 
 # Check submodules
-if [ ! -f "${SCRIPT_DIR}/submodules/GPolylla/CMakeLists.txt" ] || [ ! -f "${SCRIPT_DIR}/submodules/MPolylla/CMakeLists.txt" ]; then
+if [ ! -f "${SCRIPT_DIR}/submodules/GPolylla/CMakeLists.txt" ] || [ ! -f "${SCRIPT_DIR}/submodules/MPolylla/CMakeLists.txt" ] || [ ! -f "${SCRIPT_DIR}/submodules/MPolylla-Mesh-DCEL/CMakeLists.txt" ]; then
     echo "[PPolylla] Initializing and updating git submodules..."
     git submodule update --init --recursive
 fi

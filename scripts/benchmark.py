@@ -81,11 +81,14 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, cores: s
         data = run_single(mesh_type, sz, seed, threads=threads, cores=cores, no_seq=no_seq)
         if data:
             has_seq = data.get("has_sequential_baseline", False)
+            has_dcel = data.get("has_omp_dcel", False)
             has_task = data.get("has_omp_task", False)
             seq_time = data["sequential"]["time_total_algorithm"] if has_seq else None
+            dcel_dict = data.get("cpu_dcel", {})
             data_dict = data.get("cpu_data", data.get("cpu_loops", data.get("cpu", {})))
             tasks_dict = data.get("cpu_tasks", {})
 
+            omp_dcel_time = dcel_dict.get("time_total_algorithm", 0.0) if has_dcel else None
             omp_data_time = data_dict.get("time_total_algorithm", 0.0)
             omp_task_time = tasks_dict.get("time_total_algorithm", 0.0) if has_task else None
 
@@ -97,6 +100,7 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, cores: s
                 "cpu_threads": data.get("cpu_threads", threads),
                 "cpu_cores_affinity": data.get("cpu_cores_affinity", "all"),
                 "seq_time_ms": seq_time,
+                "omp_dcel_time_ms": omp_dcel_time,
                 "omp_data_time_ms": omp_data_time,
                 "omp_loops_time_ms": omp_data_time,  # backwards compatibility
                 "omp_tasks_time_ms": omp_task_time,
@@ -106,9 +110,11 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, cores: s
                 "gpu_copy_out_ms": data["gpu"]["time_back_to_host"],
                 "speedup_gpu_vs_seq": data.get("speedup_gpu_vs_sequential", 0.0),
                 "speedup_gpu_with_copies_vs_seq": data.get("speedup_gpu_with_copies_vs_sequential", 0.0),
+                "speedup_dcel_vs_seq": data.get("speedup_omp_dcel_vs_sequential", 0.0),
                 "speedup_data_vs_seq": data.get("speedup_omp_data_vs_sequential", data.get("speedup_omp_vs_sequential", 0.0)),
                 "speedup_omp_vs_seq": data.get("speedup_omp_vs_sequential", 0.0),
                 "speedup_task_vs_seq": data.get("speedup_omp_task_vs_sequential", 0.0),
+                "speedup_gpu_vs_dcel": data.get("speedup_gpu_vs_omp_dcel", 0.0),
                 "speedup_gpu_vs_omp": data.get("speedup_gpu_vs_omp", 0.0),
                 "speedup_gpu_vs_task": data.get("speedup_gpu_vs_omp_task", 0.0),
                 "speedup_task_vs_omp": data.get("speedup_omp_task_vs_omp", 0.0),
@@ -125,20 +131,22 @@ def run_sweep(mesh_type: str, sizes: list, seed: int, threads: int = 0, cores: s
     print(f"\n[Sweep] Summary table saved to: {csv_path}")
 
     # Print summary table
-    print("\n" + "=" * 135)
-    print(f"                                      SWEEP SUMMARY ({mesh_type.upper()}, SEED={seed})")
-    print("=" * 135)
-    header = f"{'Size (N)':>10} | {'Seq (ms)':>11} | {'OMP Data':>11} | {'OMP Task':>11} | {'GPU (ms)':>11} | {'GPU+Trans':>11} | {'GPU/Seq':>9} | {'Task/Seq':>9} | {'Data/Seq':>9}"
+    print("\n" + "=" * 150)
+    print(f"                                           SWEEP SUMMARY ({mesh_type.upper()}, SEED={seed})")
+    print("=" * 150)
+    header = f"{'Size (N)':>10} | {'Seq (ms)':>11} | {'OMP DCEL':>11} | {'OMP Data':>11} | {'OMP Task':>11} | {'GPU (ms)':>11} | {'GPU+Trans':>11} | {'GPU/Seq':>9} | {'Task/Seq':>9} | {'Data/Seq':>9} | {'DCEL/Seq':>9}"
     print(header)
-    print("-" * 135)
+    print("-" * 150)
     for _, row in df.iterrows():
         seq_str = f"{row['seq_time_ms']:>11.3f}" if row['seq_time_ms'] is not None else f"{'-':>11}"
+        dcel_str = f"{row['omp_dcel_time_ms']:>11.3f}" if ('omp_dcel_time_ms' in row and row['omp_dcel_time_ms'] is not None and not pd.isna(row['omp_dcel_time_ms'])) else f"{'-':>11}"
         task_str = f"{row['omp_tasks_time_ms']:>11.3f}" if row['omp_tasks_time_ms'] is not None else f"{'-':>11}"
         gpu_seq_str = f"{row['speedup_gpu_vs_seq']:>8.2f}x" if row['speedup_gpu_vs_seq'] > 0 else f"{'-':>9}"
         task_seq_str = f"{row['speedup_task_vs_seq']:>8.2f}x" if row['speedup_task_vs_seq'] > 0 else f"{'-':>9}"
         data_seq_str = f"{row['speedup_data_vs_seq']:>8.2f}x" if row['speedup_data_vs_seq'] > 0 else f"{'-':>9}"
-        print(f"{int(row['requested_size']):>10} | {seq_str} | {row['omp_data_time_ms']:>11.3f} | {task_str} | {row['gpu_time_ms']:>11.3f} | {row['gpu_total_with_copies_ms']:>11.3f} | {gpu_seq_str} | {task_seq_str} | {data_seq_str}")
-    print("=" * 135 + "\n")
+        dcel_seq_str = f"{row.get('speedup_dcel_vs_seq', 0.0):>8.2f}x" if row.get('speedup_dcel_vs_seq', 0.0) > 0 else f"{'-':>9}"
+        print(f"{int(row['requested_size']):>10} | {seq_str} | {dcel_str} | {row['omp_data_time_ms']:>11.3f} | {task_str} | {row['gpu_time_ms']:>11.3f} | {row['gpu_total_with_copies_ms']:>11.3f} | {gpu_seq_str} | {task_seq_str} | {data_seq_str} | {dcel_seq_str}")
+    print("=" * 150 + "\n")
 
     if plot:
         generate_plots(df, mesh_type, seed)

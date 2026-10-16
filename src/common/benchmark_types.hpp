@@ -40,6 +40,7 @@ struct SystemMetadata {
     std::string commit_gpolylla;
     std::string commit_mpolylla;
     std::string commit_mpolylla_task;
+    std::string commit_mpolylla_dcel;
     std::string commit_seq;
 
     void detect(const std::string& cmd_line = "") {
@@ -71,6 +72,7 @@ struct SystemMetadata {
         commit_gpolylla = exec_cmd_safe("git -C submodules/GPolylla rev-parse HEAD");
         commit_mpolylla = exec_cmd_safe("git -C submodules/MPolylla rev-parse HEAD");
         commit_mpolylla_task = exec_cmd_safe("git -C submodules/MPolylla-Task rev-parse HEAD");
+        commit_mpolylla_dcel = exec_cmd_safe("git -C submodules/MPolylla-Mesh-DCEL rev-parse HEAD");
         commit_seq = exec_cmd_safe("git -C submodules/Polylla-Mesh-DCEL rev-parse HEAD");
     }
 };
@@ -209,6 +211,8 @@ struct BenchmarkComparison {
 
     bool has_seq = false;
     PolyllaStats seq_stats;
+    bool has_dcel = false;
+    PolyllaStats dcel_stats;      // OpenMP DCEL (rcarrascoc/MPolylla-Mesh-DCEL)
     PolyllaStats cpu_stats;       // OpenMP Data (branch main)
     bool has_task = false;
     PolyllaStats task_stats;      // OpenMP Tasks (branch Task)
@@ -217,17 +221,24 @@ struct BenchmarkComparison {
     SystemMetadata meta;
 
     double speedup_gpu_vs_seq = 0.0;             // Seq time / GPU time
+    double speedup_dcel_vs_seq = 0.0;            // Seq time / OMP DCEL time
     double speedup_omp_vs_seq = 0.0;             // Seq time / OMP data time
     double speedup_task_vs_seq = 0.0;            // Seq time / OMP task time
+    double speedup_gpu_vs_dcel = 0.0;            // OMP DCEL time / GPU time
     double speedup_gpu_vs_omp = 0.0;             // OMP data time / GPU time
     double speedup_gpu_vs_task = 0.0;            // OMP task time / GPU time
+    double speedup_dcel_vs_omp = 0.0;            // OMP data time / OMP DCEL time
     double speedup_task_vs_omp = 0.0;            // OMP data time / OMP task time
+    double speedup_task_vs_dcel = 0.0;           // OMP DCEL time / OMP task time
     double speedup_gpu_with_copies_vs_seq = 0.0; // Seq time / (GPU time + copies)
 
     void compute_comparison() {
         if (has_seq && seq_stats.d_time_to_generate_polygonal_mesh > 0.0) {
             if (gpu_stats.d_time_to_generate_polygonal_mesh > 0.0) {
                 speedup_gpu_vs_seq = seq_stats.d_time_to_generate_polygonal_mesh / gpu_stats.d_time_to_generate_polygonal_mesh;
+            }
+            if (has_dcel && dcel_stats.d_time_to_generate_polygonal_mesh > 0.0) {
+                speedup_dcel_vs_seq = seq_stats.d_time_to_generate_polygonal_mesh / dcel_stats.d_time_to_generate_polygonal_mesh;
             }
             if (cpu_stats.d_time_to_generate_polygonal_mesh > 0.0) {
                 speedup_omp_vs_seq = seq_stats.d_time_to_generate_polygonal_mesh / cpu_stats.d_time_to_generate_polygonal_mesh;
@@ -240,6 +251,9 @@ struct BenchmarkComparison {
             }
         }
         if (gpu_stats.d_time_to_generate_polygonal_mesh > 0.0) {
+            if (has_dcel && dcel_stats.d_time_to_generate_polygonal_mesh > 0.0) {
+                speedup_gpu_vs_dcel = dcel_stats.d_time_to_generate_polygonal_mesh / gpu_stats.d_time_to_generate_polygonal_mesh;
+            }
             if (cpu_stats.d_time_to_generate_polygonal_mesh > 0.0) {
                 speedup_gpu_vs_omp = cpu_stats.d_time_to_generate_polygonal_mesh / gpu_stats.d_time_to_generate_polygonal_mesh;
             }
@@ -247,96 +261,111 @@ struct BenchmarkComparison {
                 speedup_gpu_vs_task = task_stats.d_time_to_generate_polygonal_mesh / gpu_stats.d_time_to_generate_polygonal_mesh;
             }
         }
+        if (has_dcel && cpu_stats.d_time_to_generate_polygonal_mesh > 0.0 && dcel_stats.d_time_to_generate_polygonal_mesh > 0.0) {
+            speedup_dcel_vs_omp = cpu_stats.d_time_to_generate_polygonal_mesh / dcel_stats.d_time_to_generate_polygonal_mesh;
+        }
         if (has_task && cpu_stats.d_time_to_generate_polygonal_mesh > 0.0 && task_stats.d_time_to_generate_polygonal_mesh > 0.0) {
             speedup_task_vs_omp = cpu_stats.d_time_to_generate_polygonal_mesh / task_stats.d_time_to_generate_polygonal_mesh;
+        }
+        if (has_task && has_dcel && dcel_stats.d_time_to_generate_polygonal_mesh > 0.0 && task_stats.d_time_to_generate_polygonal_mesh > 0.0) {
+            speedup_task_vs_dcel = dcel_stats.d_time_to_generate_polygonal_mesh / task_stats.d_time_to_generate_polygonal_mesh;
         }
     }
 
     void print_table(std::ostream& os = std::cout) const {
         os << "\n"
-           << "======================================================================================================================================\n"
-           << "                                                  POLYLLA BENCHMARK COMPARISON REPORT                                                 \n"
-           << "                               (Sequential Baseline vs OpenMP Data vs OpenMP Tasks vs CUDA GPU)                                       \n"
-           << "======================================================================================================================================\n";
+           << "==========================================================================================================================================================\n"
+           << "                                                              POLYLLA BENCHMARK COMPARISON REPORT                                                         \n"
+           << "                                        (Sequential Baseline vs OpenMP DCEL vs OpenMP Data vs OpenMP Tasks vs CUDA GPU)                                   \n"
+           << "==========================================================================================================================================================\n";
         os << "  Mesh Type:       " << mesh_type << "\n"
            << "  Requested Size:  " << requested_size << "\n"
            << "  Random Seed:     " << seed << "\n"
            << "  CPU Threads:     " << cpu_threads << "\n"
            << "  CPU Cores/Aff:   " << cpu_cores_affinity << "\n"
            << "  Mesh Gen Time:   " << std::fixed << std::setprecision(3) << mesh_gen_time_ms << " ms\n"
-           << "--------------------------------------------------------------------------------------------------------------------------------------\n"
-           << "  Metric / Element             SEQ (Baseline)       OMP (Data)       OMP (Tasks)       GPU (GPolylla)           Validation            \n"
-           << "--------------------------------------------------------------------------------------------------------------------------------------\n";
+           << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+           << "  Metric / Element             SEQ (Baseline)       OMP (DCEL)       OMP (Data)      OMP (Tasks)       GPU (CUDA)           Validation            \n"
+           << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
 
-        auto print_elem = [&](const char* name, long long seq, long long omp, long long task, long long gpu) {
-            std::string status = (omp == gpu && (!has_task || task == gpu)) ? "MATCH (All Parallel)" : "DIFF (Parallel)";
-            if (has_seq && (seq != omp || (has_task && seq != task))) status += "*";
+        auto print_elem = [&](const char* name, long long seq, long long dcel, long long omp, long long task, long long gpu) {
+            bool all_parallel_match = (omp == gpu && (!has_task || task == gpu) && (!has_dcel || dcel == gpu));
+            std::string status = all_parallel_match ? "MATCH (All Parallel)" : "DIFF (Parallel)";
+            if (has_seq && (seq != omp || (has_task && seq != task) || (has_dcel && seq != dcel))) status += "*";
             os << "  " << std::left << std::setw(25) << name
-               << "  " << std::right << std::setw(16) << (has_seq ? std::to_string(seq) : "-")
-               << "  " << std::right << std::setw(16) << omp
-               << "  " << std::right << std::setw(16) << (has_task ? std::to_string(task) : "-")
-               << "  " << std::right << std::setw(18) << gpu
-               << "  " << std::right << std::setw(26) << status
+               << "  " << std::right << std::setw(15) << (has_seq ? std::to_string(seq) : "-")
+               << "  " << std::right << std::setw(15) << (has_dcel ? std::to_string(dcel) : "-")
+               << "  " << std::right << std::setw(15) << omp
+               << "  " << std::right << std::setw(15) << (has_task ? std::to_string(task) : "-")
+               << "  " << std::right << std::setw(15) << gpu
+               << "  " << std::right << std::setw(23) << status
                << "\n";
         };
 
-        print_elem("Vertices (n_vertices)", seq_stats.n_vertices, cpu_stats.n_vertices, task_stats.n_vertices, gpu_stats.n_vertices);
-        print_elem("Faces (n_faces)", seq_stats.n_faces, cpu_stats.n_faces, task_stats.n_faces, gpu_stats.n_faces);
-        print_elem("Half-Edges (n_half_edges)", seq_stats.n_half_edges, cpu_stats.n_half_edges, task_stats.n_half_edges, gpu_stats.n_half_edges);
-        print_elem("Polygons (n_polygons)", seq_stats.n_polygons, cpu_stats.n_polygons, task_stats.n_polygons, gpu_stats.n_polygons);
+        print_elem("Vertices (n_vertices)", seq_stats.n_vertices, dcel_stats.n_vertices, cpu_stats.n_vertices, task_stats.n_vertices, gpu_stats.n_vertices);
+        print_elem("Faces (n_faces)", seq_stats.n_faces, dcel_stats.n_faces, cpu_stats.n_faces, task_stats.n_faces, gpu_stats.n_faces);
+        print_elem("Half-Edges (n_half_edges)", seq_stats.n_half_edges, dcel_stats.n_half_edges, cpu_stats.n_half_edges, task_stats.n_half_edges, gpu_stats.n_half_edges);
+        print_elem("Polygons (n_polygons)", seq_stats.n_polygons, dcel_stats.n_polygons, cpu_stats.n_polygons, task_stats.n_polygons, gpu_stats.n_polygons);
 
-        os << "--------------------------------------------------------------------------------------------------------------------------------------\n"
-           << "  Phase Timers (ms)            SEQ (Baseline)       OMP (Data)       OMP (Tasks)       GPU (GPolylla)         Speedup GPU/Seq         \n"
-           << "--------------------------------------------------------------------------------------------------------------------------------------\n";
+        os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+           << "  Phase Timers (ms)            SEQ (Baseline)       OMP (DCEL)       OMP (Data)      OMP (Tasks)       GPU (CUDA)         Speedup GPU/Seq         \n"
+           << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
 
-        auto print_timer = [&](const char* name, double seq_t, double omp_t, double task_t, double gpu_t) {
+        auto print_timer = [&](const char* name, double seq_t, double dcel_t, double omp_t, double task_t, double gpu_t) {
             double sp_gpu_seq = (has_seq && gpu_t > 0.0) ? (seq_t / gpu_t) : 0.0;
             os << "  " << std::left << std::setw(25) << name
-               << "  " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << (has_seq ? seq_t : 0.0)
-               << "  " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << omp_t
-               << "  " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << (has_task ? task_t : 0.0)
-               << "  " << std::right << std::setw(18) << std::fixed << std::setprecision(4) << gpu_t;
+               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << (has_seq ? seq_t : 0.0)
+               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << (has_dcel ? dcel_t : 0.0)
+               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << omp_t
+               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << (has_task ? task_t : 0.0)
+               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << gpu_t;
             if (sp_gpu_seq > 0.0) {
                 std::ostringstream ss;
                 ss << std::fixed << std::setprecision(2) << sp_gpu_seq << "x";
-                os << "  " << std::right << std::setw(24) << ss.str() << "\n";
+                os << "  " << std::right << std::setw(22) << ss.str() << "\n";
             } else {
-                os << "  " << std::right << std::setw(25) << "-\n";
+                os << "  " << std::right << std::setw(23) << "-\n";
             }
         };
 
-        print_timer("1. Triangulation Struct", seq_stats.time_triangulation_generation, cpu_stats.time_triangulation_generation, task_stats.time_triangulation_generation, gpu_stats.time_triangulation_generation);
-        print_timer("2. Label Max Edges", seq_stats.d_time_to_label_max_edges, cpu_stats.d_time_to_label_max_edges, task_stats.d_time_to_label_max_edges, gpu_stats.d_time_to_label_max_edges);
-        print_timer("3. Label Frontier Edges", seq_stats.d_time_to_label_frontier_edges, cpu_stats.d_time_to_label_frontier_edges, task_stats.d_time_to_label_frontier_edges, gpu_stats.d_time_to_label_frontier_edges);
-        print_timer("4. Label Seed Edges", seq_stats.d_time_to_label_seed_edges, cpu_stats.d_time_to_label_seed_edges, task_stats.d_time_to_label_seed_edges, gpu_stats.d_time_to_label_seed_edges);
-        print_timer("5. Repair Extra Frontier", seq_stats.d_time_to_repair, cpu_stats.d_time_to_label_extra_frontier_edge, task_stats.d_time_to_label_extra_frontier_edge, gpu_stats.d_time_to_label_extra_frontier_edge);
-        print_timer("6. Traversal Phase 1", seq_stats.d_time_to_traversal, cpu_stats.d_time_to_traversal, task_stats.d_time_to_traversal, gpu_stats.d_time_to_traversal);
-        print_timer("7. Traversal Phase 2 (Search)", 0.0, cpu_stats.d_time_to_traversal_search_frontier_edge, task_stats.d_time_to_traversal_search_frontier_edge, gpu_stats.d_time_to_traversal_search_frontier_edge);
-        print_timer("8. Repair Overwrite Seed", 0.0, cpu_stats.d_time_to_overwrite_seed, task_stats.d_time_to_overwrite_seed, gpu_stats.d_time_to_overwrite_seed);
-        print_timer("9. Label Seed Scan", 0.0, cpu_stats.d_time_to_label_scan_edges, task_stats.d_time_to_label_scan_edges, gpu_stats.d_time_to_label_scan_edges);
-        print_timer("10. Seed Compaction", 0.0, cpu_stats.d_time_to_label_compaction_edges, task_stats.d_time_to_label_compaction_edges, gpu_stats.d_time_to_label_compaction_edges);
+        print_timer("1. Triangulation Struct", seq_stats.time_triangulation_generation, dcel_stats.time_triangulation_generation, cpu_stats.time_triangulation_generation, task_stats.time_triangulation_generation, gpu_stats.time_triangulation_generation);
+        print_timer("2. Label Max Edges", seq_stats.d_time_to_label_max_edges, dcel_stats.d_time_to_label_max_edges, cpu_stats.d_time_to_label_max_edges, task_stats.d_time_to_label_max_edges, gpu_stats.d_time_to_label_max_edges);
+        print_timer("3. Label Frontier Edges", seq_stats.d_time_to_label_frontier_edges, dcel_stats.d_time_to_label_frontier_edges, cpu_stats.d_time_to_label_frontier_edges, task_stats.d_time_to_label_frontier_edges, gpu_stats.d_time_to_label_frontier_edges);
+        print_timer("4. Label Seed Edges", seq_stats.d_time_to_label_seed_edges, dcel_stats.d_time_to_label_seed_edges, cpu_stats.d_time_to_label_seed_edges, task_stats.d_time_to_label_seed_edges, gpu_stats.d_time_to_label_seed_edges);
+        print_timer("5. Repair Extra Frontier", seq_stats.d_time_to_repair, dcel_stats.d_time_to_repair, cpu_stats.d_time_to_label_extra_frontier_edge, task_stats.d_time_to_label_extra_frontier_edge, gpu_stats.d_time_to_label_extra_frontier_edge);
+        print_timer("6. Traversal Phase 1", seq_stats.d_time_to_traversal, dcel_stats.d_time_to_traversal, cpu_stats.d_time_to_traversal, task_stats.d_time_to_traversal, gpu_stats.d_time_to_traversal);
+        print_timer("7. Traversal Phase 2 (Search)", 0.0, 0.0, cpu_stats.d_time_to_traversal_search_frontier_edge, task_stats.d_time_to_traversal_search_frontier_edge, gpu_stats.d_time_to_traversal_search_frontier_edge);
+        print_timer("8. Repair Overwrite Seed", 0.0, 0.0, cpu_stats.d_time_to_overwrite_seed, task_stats.d_time_to_overwrite_seed, gpu_stats.d_time_to_overwrite_seed);
+        print_timer("9. Label Seed Scan", 0.0, 0.0, cpu_stats.d_time_to_label_scan_edges, task_stats.d_time_to_label_scan_edges, gpu_stats.d_time_to_label_scan_edges);
+        print_timer("10. Seed Compaction", 0.0, 0.0, cpu_stats.d_time_to_label_compaction_edges, task_stats.d_time_to_label_compaction_edges, gpu_stats.d_time_to_label_compaction_edges);
 
-        os << "--------------------------------------------------------------------------------------------------------------------------------------\n";
-        print_timer("TOTAL ALGORITHM TIME", seq_stats.d_time_to_generate_polygonal_mesh, cpu_stats.d_time_to_generate_polygonal_mesh, task_stats.d_time_to_generate_polygonal_mesh, gpu_stats.d_time_to_generate_polygonal_mesh);
-        os << "--------------------------------------------------------------------------------------------------------------------------------------\n";
+        os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
+        print_timer("TOTAL ALGORITHM TIME", seq_stats.d_time_to_generate_polygonal_mesh, dcel_stats.d_time_to_generate_polygonal_mesh, cpu_stats.d_time_to_generate_polygonal_mesh, task_stats.d_time_to_generate_polygonal_mesh, gpu_stats.d_time_to_generate_polygonal_mesh);
+        os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         os << "  GPU Transfer Host->Device:      " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.d_time_copy_to_device << " ms\n";
         os << "  GPU Transfer Device->Host:      " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.d_time_to_back_to_host << " ms\n";
         os << "  GPU TOTAL (Alg + Transfers):    " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.total_with_copies << " ms\n";
-        os << "--------------------------------------------------------------------------------------------------------------------------------------\n";
+        os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         if (has_seq) {
             os << "  >>> SPEEDUP GPU vs Sequential (Alg only):            " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_seq << "x\n";
             os << "  >>> SPEEDUP GPU vs Sequential (With Transfers):      " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_with_copies_vs_seq << "x\n";
+            if (has_dcel) {
+                os << "  >>> SPEEDUP OpenMP (DCEL) vs Sequential:             " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_dcel_vs_seq << "x\n";
+            }
             os << "  >>> SPEEDUP OpenMP (Data) vs Sequential:             " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_omp_vs_seq << "x\n";
             if (has_task) {
                 os << "  >>> SPEEDUP OpenMP (Tasks) vs Sequential:            " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_seq << "x\n";
             }
+        }
+        if (has_dcel) {
+            os << "  >>> SPEEDUP GPU vs OpenMP (DCEL):                    " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_dcel << "x\n";
         }
         os << "  >>> SPEEDUP GPU vs OpenMP (Data):                    " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_omp << "x\n";
         if (has_task) {
             os << "  >>> SPEEDUP GPU vs OpenMP (Tasks):                   " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_task << "x\n";
             os << "  >>> SPEEDUP OpenMP (Tasks) vs OpenMP (Data):         " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_omp << "x\n";
         }
-        os << "======================================================================================================================================\n\n";
+        os << "==========================================================================================================================================================\n\n";
     }
 
     void save_txt(const std::string& filepath) const {
@@ -363,6 +392,8 @@ struct BenchmarkComparison {
             << "  Project (PPolylla):         " << meta.commit_main << "\n"
             << "  Baseline (Sequential):      https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git\n"
             << "                              Commit: " << meta.commit_seq << "\n"
+            << "  OpenMP DCEL (MPolylla):     https://github.com/rcarrascoc/MPolylla-Mesh-DCEL.git\n"
+            << "                              Commit: " << meta.commit_mpolylla_dcel << "\n"
             << "  OpenMP Data (MPolylla):     https://github.com/rcarrascoc/MPolylla.git (branch main)\n"
             << "                              Commit: " << meta.commit_mpolylla << "\n"
             << "  OpenMP Tasks (MPolylla):    https://github.com/rcarrascoc/MPolylla.git (branch Task)\n"
@@ -425,6 +456,7 @@ struct BenchmarkComparison {
             << "    \"commit_gpolylla\": \"" << meta.commit_gpolylla << "\",\n"
             << "    \"commit_mpolylla\": \"" << meta.commit_mpolylla << "\",\n"
             << "    \"commit_mpolylla_task\": \"" << meta.commit_mpolylla_task << "\",\n"
+            << "    \"commit_mpolylla_dcel\": \"" << meta.commit_mpolylla_dcel << "\",\n"
             << "    \"commit_seq\": \"" << meta.commit_seq << "\"\n"
             << "  },\n"
             << "  \"mesh_type\": \"" << mesh_type << "\",\n"
@@ -435,12 +467,15 @@ struct BenchmarkComparison {
             << "  \"mesh_gen_time_ms\": " << mesh_gen_time_ms << ",\n"
             << "  \"off_write_time_ms\": " << off_write_time_ms << ",\n"
             << "  \"has_sequential_baseline\": " << (has_seq ? "true" : "false") << ",\n"
+            << "  \"has_omp_dcel\": " << (has_dcel ? "true" : "false") << ",\n"
             << "  \"has_omp_task\": " << (has_task ? "true" : "false") << ",\n"
             << "  \"speedup_gpu_vs_sequential\": " << speedup_gpu_vs_seq << ",\n"
             << "  \"speedup_gpu_with_copies_vs_sequential\": " << speedup_gpu_with_copies_vs_seq << ",\n"
+            << "  \"speedup_omp_dcel_vs_sequential\": " << speedup_dcel_vs_seq << ",\n"
             << "  \"speedup_omp_data_vs_sequential\": " << speedup_omp_vs_seq << ",\n"
             << "  \"speedup_omp_vs_sequential\": " << speedup_omp_vs_seq << ",\n"
             << "  \"speedup_omp_task_vs_sequential\": " << speedup_task_vs_seq << ",\n"
+            << "  \"speedup_gpu_vs_omp_dcel\": " << speedup_gpu_vs_dcel << ",\n"
             << "  \"speedup_gpu_vs_omp_data\": " << speedup_gpu_vs_omp << ",\n"
             << "  \"speedup_gpu_vs_omp\": " << speedup_gpu_vs_omp << ",\n"
             << "  \"speedup_gpu_vs_omp_task\": " << speedup_gpu_vs_task << ",\n"
@@ -460,6 +495,22 @@ struct BenchmarkComparison {
                 << "    \"time_traversal\": " << seq_stats.d_time_to_traversal << ",\n"
                 << "    \"time_repair\": " << seq_stats.d_time_to_repair << ",\n"
                 << "    \"time_total_algorithm\": " << seq_stats.d_time_to_generate_polygonal_mesh << "\n"
+                << "  },\n";
+        }
+
+        if (has_dcel) {
+            out << "  \"cpu_dcel\": {\n"
+                << "    \"n_vertices\": " << dcel_stats.n_vertices << ",\n"
+                << "    \"n_faces\": " << dcel_stats.n_faces << ",\n"
+                << "    \"n_half_edges\": " << dcel_stats.n_half_edges << ",\n"
+                << "    \"n_polygons\": " << dcel_stats.n_polygons << ",\n"
+                << "    \"time_triangulation_generation\": " << dcel_stats.time_triangulation_generation << ",\n"
+                << "    \"time_label_max_edges\": " << dcel_stats.d_time_to_label_max_edges << ",\n"
+                << "    \"time_label_frontier_edges\": " << dcel_stats.d_time_to_label_frontier_edges << ",\n"
+                << "    \"time_label_seed_edges\": " << dcel_stats.d_time_to_label_seed_edges << ",\n"
+                << "    \"time_traversal\": " << dcel_stats.d_time_to_traversal << ",\n"
+                << "    \"time_repair\": " << dcel_stats.d_time_to_repair << ",\n"
+                << "    \"time_total_algorithm\": " << dcel_stats.d_time_to_generate_polygonal_mesh << "\n"
                 << "  },\n";
         }
 

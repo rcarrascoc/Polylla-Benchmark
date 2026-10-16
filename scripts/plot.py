@@ -115,6 +115,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
             data_time_col = col
             break
 
+    dcel_time_col = "omp_dcel_time_ms" if "omp_dcel_time_ms" in df.columns and df["omp_dcel_time_ms"].notnull().any() else None
     task_time_col = "omp_tasks_time_ms" if "omp_tasks_time_ms" in df.columns and df["omp_tasks_time_ms"].notnull().any() else None
     seq_time_col = "seq_time_ms" if "seq_time_ms" in df.columns and df["seq_time_ms"].notnull().any() else None
 
@@ -123,6 +124,8 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     if has_seq:
         seq_time = df[seq_time_col]
         df["calc_speedup_gpu_alg"] = seq_time / df["gpu_time_ms"]
+        if dcel_time_col:
+            df["calc_speedup_dcel"] = seq_time / df[dcel_time_col]
         if data_time_col:
             df["calc_speedup_data"] = seq_time / df[data_time_col]
         if task_time_col:
@@ -139,14 +142,18 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
             ax.plot(df["n_vertices"], df["calc_speedup_gpu_alg"],
                     marker="o", markersize=8, color="#2ca02c", linewidth=2.5,
                     label="GPU (GPolylla)")
-            if task_time_col:
-                ax.plot(df["n_vertices"], df["calc_speedup_task"],
-                        marker="v", markersize=7, color="#9467bd", linewidth=2.2,
-                        label="OpenMP Task (MPolylla)")
+            if dcel_time_col:
+                ax.plot(df["n_vertices"], df["calc_speedup_dcel"],
+                        marker="s", markersize=7, color="#ff7f0e", linewidth=2.2,
+                        label="OpenMP DCEL (MPolylla-Mesh-DCEL)")
             if data_time_col:
                 ax.plot(df["n_vertices"], df["calc_speedup_data"],
                         marker="^", markersize=7, color="#1f77b4", linewidth=2.2,
                         label="OpenMP Data (MPolylla)")
+            if task_time_col:
+                ax.plot(df["n_vertices"], df["calc_speedup_task"],
+                        marker="v", markersize=7, color="#9467bd", linewidth=2.2,
+                        label="OpenMP Task (MPolylla)")
             ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.5, label="Sequential Baseline (1.0x)")
 
             x_min, x_max = df["n_vertices"].min(), df["n_vertices"].max()
@@ -166,13 +173,17 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         endpoints_to_annotate = [
             {"val": df["calc_speedup_gpu_alg"].iloc[-1], "color": "#2ca02c", "text": f"{df['calc_speedup_gpu_alg'].iloc[-1]:.1f}x"}
         ]
-        if task_time_col:
+        if dcel_time_col:
             endpoints_to_annotate.append(
-                {"val": df["calc_speedup_task"].iloc[-1], "color": "#9467bd", "text": f"{df['calc_speedup_task'].iloc[-1]:.1f}x"}
+                {"val": df["calc_speedup_dcel"].iloc[-1], "color": "#ff7f0e", "text": f"{df['calc_speedup_dcel'].iloc[-1]:.1f}x"}
             )
         if data_time_col:
             endpoints_to_annotate.append(
                 {"val": df["calc_speedup_data"].iloc[-1], "color": "#1f77b4", "text": f"{df['calc_speedup_data'].iloc[-1]:.1f}x"}
+            )
+        if task_time_col:
+            endpoints_to_annotate.append(
+                {"val": df["calc_speedup_task"].iloc[-1], "color": "#9467bd", "text": f"{df['calc_speedup_task'].iloc[-1]:.1f}x"}
             )
         x_last = df["n_vertices"].iloc[-1]
 
@@ -215,6 +226,10 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
             ax.plot(df["n_vertices"], df[seq_time_col],
                     marker="x", markersize=8, color="#7f7f7f", linewidth=2.2,
                     label="Sequential Baseline (Polylla-Mesh-DCEL)")
+        if dcel_time_col:
+            ax.plot(df["n_vertices"], df[dcel_time_col],
+                    marker="s", markersize=7, color="#ff7f0e", linewidth=2.2,
+                    label="OpenMP DCEL (MPolylla-Mesh-DCEL)")
         if data_time_col:
             ax.plot(df["n_vertices"], df[data_time_col],
                     marker="^", markersize=7, color="#1f77b4", linewidth=2.2,

@@ -92,12 +92,29 @@ target_link_libraries(mpolylla_task_runner PRIVATE
     OpenMP::OpenMP_CXX
 )
 
-# 6. Build main benchmark executable
+# 6. Build CPU DCEL runner shared library (rcarrascoc/MPolylla-Mesh-DCEL)
+add_library(mpolylla_dcel_runner SHARED
+    src/runners/cpu_dcel_runner.cpp
+)
+target_include_directories(mpolylla_dcel_runner PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/submodules/MPolylla-Mesh-DCEL/src
+)
+set_target_properties(mpolylla_dcel_runner PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
+target_link_libraries(mpolylla_dcel_runner PRIVATE
+    OpenMP::OpenMP_CXX
+)
+
+# 7. Build main benchmark executable
 add_executable(ppolylla_benchmark
     src/main.cpp
 )
 target_link_libraries(ppolylla_benchmark PRIVATE
     seq_runner
+    mpolylla_dcel_runner
     mpolylla_runner
     mpolylla_task_runner
     gpolylla_runner
