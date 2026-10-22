@@ -238,7 +238,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         ax.set_ylabel("Speedup Factor (Log Scale over Baseline)", fontsize=12, fontweight="bold")
         ax.set_title(f"Polylla Speedup vs Baseline (Log Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
         ax.grid(True, which="both", linestyle="--", alpha=0.6)
-        ax.legend(fontsize=10, loc="upper left", framealpha=0.95)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=5, fontsize=10, frameon=True, framealpha=0.95)
         fig.tight_layout()
         annotate_endpoints(ax, [dict(e) for e in endpoints_to_annotate], x_last, fig)
         speedup_log_path = output_dir / f"speedup_log_{mesh_type}.png"
@@ -253,7 +253,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         ax.set_ylabel("Speedup Factor (Linear over Baseline)", fontsize=12, fontweight="bold")
         ax.set_title(f"Polylla Speedup vs Baseline (Linear Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
         ax.grid(True, linestyle="--", alpha=0.6)
-        ax.legend(fontsize=10, loc="upper left", framealpha=0.95)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=5, fontsize=10, frameon=True, framealpha=0.95)
         fig.tight_layout()
         annotate_endpoints(ax, [dict(e) for e in endpoints_to_annotate], x_last, fig)
         speedup_lin_path = output_dir / f"speedup_linear_{mesh_type}.png"
@@ -327,7 +327,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     ax.set_ylabel("Execution Time (ms)", fontsize=12, fontweight="bold")
     ax.set_title(f"Polylla Execution Time (Linear Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
     ax.grid(True, linestyle="--", alpha=0.6)
-    ax.legend(fontsize=10, loc="best", framealpha=0.9)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=5, fontsize=10, frameon=True, framealpha=0.95)
     fig.tight_layout()
     time_linear_path = output_dir / f"time_linear_{mesh_type}.png"
     fig.savefig(time_linear_path, bbox_inches="tight")
@@ -340,7 +340,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=12, fontweight="bold")
     ax.set_title(f"Polylla Execution Time (Logarithmic Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
     ax.grid(True, which="both", linestyle="--", alpha=0.6)
-    ax.legend(fontsize=10, loc="best", framealpha=0.9)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=5, fontsize=10, frameon=True, framealpha=0.95)
     fig.tight_layout()
     time_log_path = output_dir / f"time_log_{mesh_type}.png"
     fig.savefig(time_log_path, bbox_inches="tight")
