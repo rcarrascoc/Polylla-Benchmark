@@ -18,15 +18,20 @@ import os
 import sys
 import argparse
 from pathlib import Path
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import pandas as pd
-
 import numpy as np
+
+# Ensure TrueType (Type 42) font embedding for PDF output (required by IEEE/ACM)
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = PROJECT_ROOT / "results"
 PLOTS_DIR = PROJECT_ROOT / "plots"
+PLOTS_PDF_DIR = PROJECT_ROOT / "plots_pdf"
 
 def format_vertices_axis(ax):
     """Formats the X-axis for human-readable vertex counts (10K, 100K, 1M, 10M, etc.)."""
@@ -101,9 +106,14 @@ def annotate_endpoints(ax, items, x_last, fig, min_gap_pt=14.0, baseline_val=1.0
             ) if shifted else None,
         )
 
-def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int = 42, output_dir: Path = PLOTS_DIR, seeds_info: str = "", runs: int = 1):
+def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int = 42,
+                        output_dir: Path = PLOTS_DIR, seeds_info: str = "", runs: int = 1,
+                        formats: list = None, show_title: bool = True):
     """Generates speedup and time (linear and log) plots from a pandas DataFrame."""
+    if formats is None:
+        formats = ["png"]
     output_dir.mkdir(parents=True, exist_ok=True)
+    fig_w, fig_h = (5.5, 4.6) if not show_title else (5.5, 5.0)
 
     # Sort DataFrame by vertex count
     df = df.sort_values(by="n_vertices").copy()
@@ -234,33 +244,38 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         x_last = df["n_vertices"].iloc[-1]
 
         # 1a. Speedup Logarithmic
-        fig, ax = plt.subplots(figsize=(5.5, 5.0), dpi=300)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
         draw_speedup_curves(ax, log_scale=True)
         ax.set_ylabel("Speedup Factor (Log Scale over Baseline)", fontsize=10.5, fontweight="bold")
-        ax.set_title(f"Polylla Speedup vs Baseline (Log Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+        if show_title:
+            ax.set_title(f"Polylla Speedup vs Baseline (Log Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
         ax.grid(True, which="both", linestyle="--", alpha=0.6)
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
         fig.tight_layout()
         annotate_endpoints(ax, [dict(e) for e in endpoints_to_annotate], x_last, fig)
-        speedup_log_path = output_dir / f"speedup_log_{mesh_type}.png"
-        fig.savefig(speedup_log_path, bbox_inches="tight")
-        fig.savefig(output_dir / f"speedup_{mesh_type}.png", bbox_inches="tight")
+        for fmt in formats:
+            speedup_log_path = output_dir / f"speedup_log_{mesh_type}.{fmt}"
+            fig.savefig(speedup_log_path, bbox_inches="tight", dpi=300)
+            if fmt == "png":
+                fig.savefig(output_dir / f"speedup_{mesh_type}.png", bbox_inches="tight")
+            print(f"  [+] Saved Speedup Log Plot:        {speedup_log_path}")
         plt.close(fig)
-        print(f"  [+] Saved Speedup Log Plot:        {speedup_log_path}")
 
         # 1b. Speedup Linear
-        fig, ax = plt.subplots(figsize=(5.5, 5.0), dpi=300)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
         draw_speedup_curves(ax, log_scale=False)
         ax.set_ylabel("Speedup Factor (Linear over Baseline)", fontsize=10.5, fontweight="bold")
-        ax.set_title(f"Polylla Speedup vs Baseline (Linear Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+        if show_title:
+            ax.set_title(f"Polylla Speedup vs Baseline (Linear Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
         ax.grid(True, linestyle="--", alpha=0.6)
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
         fig.tight_layout()
         annotate_endpoints(ax, [dict(e) for e in endpoints_to_annotate], x_last, fig)
-        speedup_lin_path = output_dir / f"speedup_linear_{mesh_type}.png"
-        fig.savefig(speedup_lin_path, bbox_inches="tight")
+        for fmt in formats:
+            speedup_lin_path = output_dir / f"speedup_linear_{mesh_type}.{fmt}"
+            fig.savefig(speedup_lin_path, bbox_inches="tight", dpi=300)
+            print(f"  [+] Saved Speedup Linear Plot:     {speedup_lin_path}")
         plt.close(fig)
-        print(f"  [+] Saved Speedup Linear Plot:     {speedup_lin_path}")
     else:
         print("  [-] Skipping Speedup plot (Sequential baseline data not available)")
 
@@ -324,33 +339,38 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         ax.tick_params(labelsize=9)
 
     # 2a. Time Linear Plot
-    fig, ax = plt.subplots(figsize=(5.5, 5.0), dpi=300)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
     draw_time_curves(ax, log_scale=False)
     ax.set_ylabel("Execution Time (ms)", fontsize=10.5, fontweight="bold")
-    ax.set_title(f"Polylla Execution Time (Linear Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+    if show_title:
+        ax.set_title(f"Polylla Execution Time (Linear Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
     ax.grid(True, linestyle="--", alpha=0.6)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
     fig.tight_layout()
-    time_linear_path = output_dir / f"time_linear_{mesh_type}.png"
-    fig.savefig(time_linear_path, bbox_inches="tight")
+    for fmt in formats:
+        time_linear_path = output_dir / f"time_linear_{mesh_type}.{fmt}"
+        fig.savefig(time_linear_path, bbox_inches="tight", dpi=300)
+        print(f"  [+] Saved Time Linear Plot:        {time_linear_path}")
     plt.close(fig)
-    print(f"  [+] Saved Time Linear Plot:        {time_linear_path}")
 
     # 2b. Time Logarithmic Plot
-    fig, ax = plt.subplots(figsize=(5.5, 5.0), dpi=300)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
     draw_time_curves(ax, log_scale=True)
     ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=10.5, fontweight="bold")
-    ax.set_title(f"Polylla Execution Time (Logarithmic Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+    if show_title:
+        ax.set_title(f"Polylla Execution Time (Logarithmic Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
     ax.grid(True, which="both", linestyle="--", alpha=0.6)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
     fig.tight_layout()
-    time_log_path = output_dir / f"time_log_{mesh_type}.png"
-    fig.savefig(time_log_path, bbox_inches="tight")
-    fig.savefig(output_dir / f"time_{mesh_type}.png", bbox_inches="tight")
+    for fmt in formats:
+        time_log_path = output_dir / f"time_log_{mesh_type}.{fmt}"
+        fig.savefig(time_log_path, bbox_inches="tight", dpi=300)
+        if fmt == "png":
+            fig.savefig(output_dir / f"time_{mesh_type}.png", bbox_inches="tight")
+        print(f"  [+] Saved Time Logarithmic Plot:   {time_log_path}")
     plt.close(fig)
-    print(f"  [+] Saved Time Logarithmic Plot:   {time_log_path}")
 
-def plot_file(csv_path: Path, output_dir: Path = PLOTS_DIR):
+def plot_file(csv_path: Path, output_dir: Path = PLOTS_DIR, formats: list = None, show_title: bool = True):
     """Parses a CSV file and triggers plot generation."""
     if not csv_path.exists():
         print(f"[Error] File not found: {csv_path}")
@@ -395,7 +415,8 @@ def plot_file(csv_path: Path, output_dir: Path = PLOTS_DIR):
         except Exception:
             pass
 
-    plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=output_dir, seeds_info=seeds_info, runs=runs)
+    plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=output_dir,
+                        seeds_info=seeds_info, runs=runs, formats=formats, show_title=show_title)
     return True
 
 def main():
@@ -403,44 +424,86 @@ def main():
         description="Standalone Plotting Tool for PPolylla Benchmark Results",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python3 scripts/plot.py                               # Automatically plots the latest sweep_*.csv
+  python3 scripts/plot.py                               # Automatically plots the latest sweep_*.csv (PNG with title in plots/)
   python3 scripts/plot.py --all                         # Plots all sweep_*.csv found in results/
+  python3 scripts/plot.py --pdf --all                   # Plots all sweep_*.csv as vector PDFs without title in plots_pdf/
   python3 scripts/plot.py results/sweep_uniform_seed42.csv
   python3 scripts/plot.py --csv results/sweep_uniform_seed42.csv --outdir custom_plots/
 """
     )
     parser.add_argument("csv_positional", nargs="?", default=None, help="Path to CSV file (optional positional argument)")
     parser.add_argument("--csv", "-c", type=str, default=None, help="Path to CSV file (flag argument)")
-    parser.add_argument("--outdir", "-o", type=str, default=str(PLOTS_DIR), help="Output directory for plots (default: plots/)")
+    parser.add_argument("--outdir", "-o", type=str, default=None, help="Output directory for plots (default: plots/ or plots_pdf/)")
     parser.add_argument("--all", "-a", action="store_true", help="Plot all sweep CSV files in results/")
+    parser.add_argument("--pdf", action="store_true", help="Generate publication-ready PDF plots without titles in plots_pdf/")
+    parser.add_argument("--no-title", action="store_true", help="Omit figure title (ideal for LaTeX paper captions)")
+    parser.add_argument("--format", "-f", type=str, default=None, help="Output format: png, pdf, or png,pdf (comma-separated)")
     parser.add_argument("--plot-only", action="store_true", help="Compatibility flag for runner script")
 
     args, unknown = parser.parse_known_args()
     target_csv = args.csv or args.csv_positional
-    output_dir = Path(args.outdir)
+
+    if args.pdf:
+        default_outdir = PLOTS_PDF_DIR
+        formats = ["pdf"]
+        show_title = False
+    else:
+        default_outdir = PLOTS_DIR
+        formats = ["png"]
+        show_title = True
+
+    if args.format:
+        formats = [fmt.strip().lower() for fmt in args.format.split(",") if fmt.strip()]
+
+    if args.no_title:
+        show_title = False
+
+    output_dir = Path(args.outdir) if args.outdir else default_outdir
 
     if target_csv:
         csv_path = Path(target_csv)
-        plot_file(csv_path, output_dir=output_dir)
+        plot_file(csv_path, output_dir=output_dir, formats=formats, show_title=show_title)
     else:
-        # Scan results directory for sweep CSVs
-        csv_files = sorted(RESULTS_DIR.glob("sweep_*.csv"), key=os.path.getmtime, reverse=True)
-        if not csv_files:
-            csv_files = list(RESULTS_DIR.glob("*.csv"))
+        # Scan results directory for sweep CSVs (excluding raw unaggregated dumps)
+        candidate_files = [f for f in RESULTS_DIR.glob("sweep_*.csv") if not f.name.endswith("_raw.csv")]
+        if not candidate_files:
+            candidate_files = [f for f in RESULTS_DIR.glob("*.csv") if not f.name.endswith("_raw.csv")]
 
-        if not csv_files:
+        if not candidate_files:
             print(f"[Plotter] No CSV benchmark results found in {RESULTS_DIR}")
             print("Run a sweep benchmark first, e.g.:")
             print("  ./run_benchmark.sh --sweep --type uniform --sizes 10000,50000,100000")
             sys.exit(1)
 
-        if args.all or len(csv_files) == 1:
-            for f in csv_files:
-                plot_file(f, output_dir=output_dir)
+        if args.all:
+            # Group candidate files by mesh type to select the best canonical dataset per type
+            mesh_types = set()
+            for f in candidate_files:
+                for part in f.stem.split("_"):
+                    if part in ["uniform", "grid"]:
+                        mesh_types.add(part)
+
+            selected_files = []
+            for m in sorted(mesh_types):
+                canonical = RESULTS_DIR / f"sweep_{m}.csv"
+                if canonical.exists():
+                    selected_files.append(canonical)
+                else:
+                    matching = [f for f in candidate_files if f"_{m}" in f.stem or f.stem.startswith(f"sweep_{m}")]
+                    if matching:
+                        matching.sort(key=os.path.getmtime, reverse=True)
+                        selected_files.append(matching[0])
+
+            if not selected_files:
+                selected_files = sorted(candidate_files, key=os.path.getmtime, reverse=True)
+
+            for f in selected_files:
+                plot_file(f, output_dir=output_dir, formats=formats, show_title=show_title)
         else:
-            print(f"[Plotter] Multiple CSVs found. Plotting latest: {csv_files[0].name}")
-            print(f"         (Tip: use --all to plot all {len(csv_files)} files)")
-            plot_file(csv_files[0], output_dir=output_dir)
+            sorted_files = sorted(candidate_files, key=os.path.getmtime, reverse=True)
+            print(f"[Plotter] Multiple CSVs found. Plotting latest: {sorted_files[0].name}")
+            print(f"         (Tip: use --all to plot all mesh types)")
+            plot_file(sorted_files[0], output_dir=output_dir, formats=formats, show_title=show_title)
 
     print("\n[Plotter] Done! All plots updated in directory: " + str(output_dir) + "\n")
 
