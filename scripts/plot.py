@@ -40,7 +40,7 @@ def format_vertices_axis(ax):
             return f"{val:g}"
     ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_k_m))
 
-def annotate_endpoints(ax, items, x_last, fig, min_gap_pt=18.0, baseline_val=1.0):
+def annotate_endpoints(ax, items, x_last, fig, min_gap_pt=14.0, baseline_val=1.0):
     """
     Annotates the final endpoints of curves with callout badges that do not overlap.
     items: list of dicts with {'val': float, 'color': str, 'text': str}
@@ -61,8 +61,8 @@ def annotate_endpoints(ax, items, x_last, fig, min_gap_pt=18.0, baseline_val=1.0
     # If baseline is defined, keep lowest badge cleanly above baseline
     if baseline_val is not None:
         base_py_pt = ax.transData.transform((x_last, baseline_val))[1] * 72.0 / dpi
-        if items[0]["target_py_pt"] < base_py_pt + 8.0:
-            items[0]["target_py_pt"] = base_py_pt + 8.0
+        if items[0]["target_py_pt"] < base_py_pt + 6.0:
+            items[0]["target_py_pt"] = base_py_pt + 6.0
 
     # Iterative relaxation to guarantee physical vertical separation in points
     for _ in range(60):
@@ -74,7 +74,7 @@ def annotate_endpoints(ax, items, x_last, fig, min_gap_pt=18.0, baseline_val=1.0
     bottom_pt = bbox.ymin * 72.0 / dpi
     top_pt = bbox.ymax * 72.0 / dpi
     for item in items:
-        item["target_py_pt"] = np.clip(item["target_py_pt"], bottom_pt + 8, top_pt - 8)
+        item["target_py_pt"] = np.clip(item["target_py_pt"], bottom_pt + 6, top_pt - 6)
 
     for item in items:
         dy = item["target_py_pt"] - item["py_pt"]
@@ -83,21 +83,21 @@ def annotate_endpoints(ax, items, x_last, fig, min_gap_pt=18.0, baseline_val=1.0
             item["text"],
             xy=(x_last, item["val"]),
             xycoords="data",
-            xytext=(10, dy),
+            xytext=(8, dy),
             textcoords="offset points",
             va="center",
             ha="left",
-            fontsize=10,
+            fontsize=8.5,
             fontweight="bold",
             color=item["color"],
-            bbox=dict(boxstyle="round,pad=0.25", fc="white", ec=item["color"], lw=1.3, alpha=0.95),
+            bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=item["color"], lw=1.1, alpha=0.95),
             arrowprops=dict(
                 arrowstyle="->",
                 color=item["color"],
-                lw=1.0,
+                lw=0.9,
                 linestyle="--",
-                shrinkA=3,
-                shrinkB=3,
+                shrinkA=2,
+                shrinkB=2,
             ) if shifted else None,
         )
 
@@ -185,35 +185,36 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     if has_seq:
         def draw_speedup_curves(ax, log_scale=False):
             ax.plot(df["n_vertices"], df["calc_speedup_gpu_alg"],
-                    marker="o", markersize=8, color="#2ca02c", linewidth=2.5,
+                    marker="o", markersize=6.5, color="#2ca02c", linewidth=2.2,
                     label="GPolylla")
             if dcel_time_col:
                 ax.plot(df["n_vertices"], df["calc_speedup_dcel"],
-                        marker="s", markersize=7, color="#ff7f0e", linewidth=2.2,
+                        marker="s", markersize=5.5, color="#ff7f0e", linewidth=1.8,
                         label=f"MPolylla DCEL{omp_suffix}")
             if data_time_col:
                 ax.plot(df["n_vertices"], df["calc_speedup_data"],
-                        marker="^", markersize=7, color="#1f77b4", linewidth=2.2,
+                        marker="^", markersize=5.5, color="#1f77b4", linewidth=1.8,
                         label=f"MPolylla Data{omp_suffix}")
             if task_time_col:
                 ax.plot(df["n_vertices"], df["calc_speedup_task"],
-                        marker="v", markersize=7, color="#9467bd", linewidth=2.2,
+                        marker="v", markersize=5.5, color="#9467bd", linewidth=1.8,
                         label=f"MPolylla Task{omp_suffix}")
-            ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.5, label="Polylla-Mesh-DCEL")
+            ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.3, label="Polylla-Mesh-DCEL")
 
             x_min, x_max = df["n_vertices"].min(), df["n_vertices"].max()
             x_span = x_max - x_min if x_max > x_min else x_max
-            ax.set_xlim(x_min - 0.03 * x_span, x_max + 0.16 * x_span)
+            ax.set_xlim(x_min - 0.03 * x_span, x_max + 0.18 * x_span)
 
             y_max = df["calc_speedup_gpu_alg"].max()
             if log_scale:
                 ax.set_yscale("log")
-                ax.set_ylim(bottom=0.7, top=y_max * 2.5)
+                ax.set_ylim(bottom=0.7, top=y_max * 2.8)
             else:
                 ax.set_ylim(bottom=-0.02 * y_max, top=y_max * 1.08)
 
-            ax.set_xlabel("Number of Vertices", fontsize=11, fontweight="bold")
+            ax.set_xlabel("Number of Vertices", fontsize=10.5, fontweight="bold")
             format_vertices_axis(ax)
+            ax.tick_params(labelsize=9)
 
         endpoints_to_annotate = [
             {"val": df["calc_speedup_gpu_alg"].iloc[-1], "color": "#2ca02c", "text": f"{df['calc_speedup_gpu_alg'].iloc[-1]:.1f}x"}
@@ -233,12 +234,12 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         x_last = df["n_vertices"].iloc[-1]
 
         # 1a. Speedup Logarithmic
-        fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+        fig, ax = plt.subplots(figsize=(5.5, 5.0), dpi=300)
         draw_speedup_curves(ax, log_scale=True)
-        ax.set_ylabel("Speedup Factor (Log Scale over Baseline)", fontsize=12, fontweight="bold")
-        ax.set_title(f"Polylla Speedup vs Baseline (Log Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
+        ax.set_ylabel("Speedup Factor (Log Scale over Baseline)", fontsize=10.5, fontweight="bold")
+        ax.set_title(f"Polylla Speedup vs Baseline (Log Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
         ax.grid(True, which="both", linestyle="--", alpha=0.6)
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2, fontsize=10, frameon=True, framealpha=0.95)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
         fig.tight_layout()
         annotate_endpoints(ax, [dict(e) for e in endpoints_to_annotate], x_last, fig)
         speedup_log_path = output_dir / f"speedup_log_{mesh_type}.png"
@@ -248,12 +249,12 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         print(f"  [+] Saved Speedup Log Plot:        {speedup_log_path}")
 
         # 1b. Speedup Linear
-        fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+        fig, ax = plt.subplots(figsize=(5.5, 5.0), dpi=300)
         draw_speedup_curves(ax, log_scale=False)
-        ax.set_ylabel("Speedup Factor (Linear over Baseline)", fontsize=12, fontweight="bold")
-        ax.set_title(f"Polylla Speedup vs Baseline (Linear Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
+        ax.set_ylabel("Speedup Factor (Linear over Baseline)", fontsize=10.5, fontweight="bold")
+        ax.set_title(f"Polylla Speedup vs Baseline (Linear Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
         ax.grid(True, linestyle="--", alpha=0.6)
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2, fontsize=10, frameon=True, framealpha=0.95)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
         fig.tight_layout()
         annotate_endpoints(ax, [dict(e) for e in endpoints_to_annotate], x_last, fig)
         speedup_lin_path = output_dir / f"speedup_linear_{mesh_type}.png"
@@ -269,7 +270,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     def draw_time_curves(ax, log_scale=False):
         if has_seq:
             ax.plot(df["n_vertices"], df[seq_time_col],
-                    marker="x", markersize=8, color="#7f7f7f", linewidth=2.2,
+                    marker="x", markersize=6.5, color="#7f7f7f", linewidth=1.8,
                     label="Polylla-Mesh-DCEL")
             if seq_std_col and (df[seq_std_col] > 0).any():
                 ax.fill_between(df["n_vertices"],
@@ -279,7 +280,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
 
         if dcel_time_col:
             ax.plot(df["n_vertices"], df[dcel_time_col],
-                    marker="s", markersize=7, color="#ff7f0e", linewidth=2.2,
+                    marker="s", markersize=5.5, color="#ff7f0e", linewidth=1.8,
                     label=f"MPolylla DCEL{omp_suffix}")
             if dcel_std_col and (df[dcel_std_col] > 0).any():
                 ax.fill_between(df["n_vertices"],
@@ -289,7 +290,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
 
         if data_time_col:
             ax.plot(df["n_vertices"], df[data_time_col],
-                    marker="^", markersize=7, color="#1f77b4", linewidth=2.2,
+                    marker="^", markersize=5.5, color="#1f77b4", linewidth=1.8,
                     label=f"MPolylla Data{omp_suffix}")
             if data_std_col and (df[data_std_col] > 0).any():
                 ax.fill_between(df["n_vertices"],
@@ -299,7 +300,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
 
         if task_time_col:
             ax.plot(df["n_vertices"], df[task_time_col],
-                    marker="v", markersize=7, color="#9467bd", linewidth=2.2,
+                    marker="v", markersize=5.5, color="#9467bd", linewidth=1.8,
                     label=f"MPolylla Task{omp_suffix}")
             if task_std_col and (df[task_std_col] > 0).any():
                 ax.fill_between(df["n_vertices"],
@@ -308,7 +309,7 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
                                 color="#9467bd", alpha=0.18)
 
         ax.plot(df["n_vertices"], df["gpu_time_ms"],
-                marker="o", markersize=8, color="#2ca02c", linewidth=2.5,
+                marker="o", markersize=6.5, color="#2ca02c", linewidth=2.2,
                 label="GPolylla")
         if gpu_std_col and (df[gpu_std_col] > 0).any():
             ax.fill_between(df["n_vertices"],
@@ -318,16 +319,17 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
 
         if log_scale:
             ax.set_yscale("log")
-        ax.set_xlabel("Number of Vertices", fontsize=11, fontweight="bold")
+        ax.set_xlabel("Number of Vertices", fontsize=10.5, fontweight="bold")
         format_vertices_axis(ax)
+        ax.tick_params(labelsize=9)
 
     # 2a. Time Linear Plot
-    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+    fig, ax = plt.subplots(figsize=(5.5, 5.0), dpi=300)
     draw_time_curves(ax, log_scale=False)
-    ax.set_ylabel("Execution Time (ms)", fontsize=12, fontweight="bold")
-    ax.set_title(f"Polylla Execution Time (Linear Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
+    ax.set_ylabel("Execution Time (ms)", fontsize=10.5, fontweight="bold")
+    ax.set_title(f"Polylla Execution Time (Linear Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
     ax.grid(True, linestyle="--", alpha=0.6)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2, fontsize=10, frameon=True, framealpha=0.95)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
     fig.tight_layout()
     time_linear_path = output_dir / f"time_linear_{mesh_type}.png"
     fig.savefig(time_linear_path, bbox_inches="tight")
@@ -335,12 +337,12 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     print(f"  [+] Saved Time Linear Plot:        {time_linear_path}")
 
     # 2b. Time Logarithmic Plot
-    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+    fig, ax = plt.subplots(figsize=(5.5, 5.0), dpi=300)
     draw_time_curves(ax, log_scale=True)
-    ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=12, fontweight="bold")
-    ax.set_title(f"Polylla Execution Time (Logarithmic Scale)\n{title_sub}", fontsize=13, fontweight="bold", pad=12)
+    ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=10.5, fontweight="bold")
+    ax.set_title(f"Polylla Execution Time (Logarithmic Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
     ax.grid(True, which="both", linestyle="--", alpha=0.6)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2, fontsize=10, frameon=True, framealpha=0.95)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
     fig.tight_layout()
     time_log_path = output_dir / f"time_log_{mesh_type}.png"
     fig.savefig(time_log_path, bbox_inches="tight")
