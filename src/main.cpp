@@ -33,6 +33,7 @@ void print_help(const char* prog_name) {
               << "  -o, --output <FILE>          Path to save comparison JSON (default: results/...)\n"
               << "  -f, --off <FILE>             Run benchmark on an existing .off file\n"
               << "  --no-seq                     Skip sequential CPU baseline (useful for very large meshes)\n"
+              << "  --no-gpu                     Skip CUDA GPU benchmark\n"
               << "  --save-mesh <FILE>           Save the generated mesh to a persistent .off file\n"
               << "  -h, --help                   Show this help message\n\n"
               << "Robust Benchmark Examples:\n"
@@ -56,6 +57,7 @@ BenchmarkComparison run_benchmark_instance(
     const std::string& input_off,
     const std::string& save_mesh_path,
     bool run_sequential,
+    bool run_gpu,
     int cpu_threads,
     const std::string& affinity_desc,
     const std::vector<int>& affinity_cores,
@@ -251,33 +253,39 @@ BenchmarkComparison run_benchmark_instance(
     }
 
     // 5. GPU CUDA
-    std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [5/5] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla - CUDA"
-              << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
-              << "------------------------------------------------------------------------\n";
-    std::vector<PolyllaStats> gpu_runs;
-    for (int r = 0; r < num_runs; ++r) {
-        std::string tmp_gpu_json = "/dev/shm/gpu_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
-        PolyllaStats s;
-        bool ok = run_gpolylla_from_memory(&mesh, tmp_gpu_json.c_str(), &s);
-        std::remove(tmp_gpu_json.c_str());
-        if (ok) {
-            if (num_runs > 1) {
-                std::cout << "    Run " << (r + 1) << "/" << num_runs << ": " 
-                          << std::fixed << std::setprecision(3) << s.d_time_to_generate_polygonal_mesh << " ms\n";
+    if (run_gpu) {
+        std::cout << "\n------------------------------------------------------------------------\n"
+                  << "  [5/5] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla - CUDA"
+                  << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
+                  << "------------------------------------------------------------------------\n";
+        std::vector<PolyllaStats> gpu_runs;
+        for (int r = 0; r < num_runs; ++r) {
+            std::string tmp_gpu_json = "/dev/shm/gpu_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
+            PolyllaStats s;
+            bool ok = run_gpolylla_from_memory(&mesh, tmp_gpu_json.c_str(), &s);
+            std::remove(tmp_gpu_json.c_str());
+            if (ok) {
+                if (num_runs > 1) {
+                    std::cout << "    Run " << (r + 1) << "/" << num_runs << ": " 
+                              << std::fixed << std::setprecision(3) << s.d_time_to_generate_polygonal_mesh << " ms\n";
+                }
+                gpu_runs.push_back(s);
+            } else {
+                std::cerr << "Warning: GPU benchmark run " << (r + 1) << " failed! Message: " << s.error_message << std::endl;
             }
-            gpu_runs.push_back(s);
-        } else {
-            std::cerr << "Warning: GPU benchmark run " << (r + 1) << " failed! Message: " << s.error_message << std::endl;
         }
-    }
-    if (!gpu_runs.empty()) {
-        comp.gpu_stats.aggregate_runs(gpu_runs);
-        if (num_runs > 1) {
-            std::cout << "    --> GPolylla Mean: " << std::fixed << std::setprecision(3) 
-                      << comp.gpu_stats.d_time_to_generate_polygonal_mesh << " ± " 
-                      << comp.gpu_stats.time_total_algorithm_std << " ms\n";
+        comp.has_gpu = !gpu_runs.empty();
+        if (comp.has_gpu) {
+            comp.gpu_stats.aggregate_runs(gpu_runs);
+            if (num_runs > 1) {
+                std::cout << "    --> GPolylla Mean: " << std::fixed << std::setprecision(3) 
+                          << comp.gpu_stats.d_time_to_generate_polygonal_mesh << " ± " 
+                          << comp.gpu_stats.time_total_algorithm_std << " ms\n";
+            }
         }
+    } else {
+        std::cout << "\n[Info] Skipping GPU benchmark (--no-gpu requested)\n";
+        comp.has_gpu = false;
     }
 
     comp.compute_comparison();
@@ -296,6 +304,7 @@ int main(int argc, char* argv[]) {
     std::string input_off = "";
     std::string save_mesh_path = "";
     bool run_sequential = true;
+    bool run_gpu = true;
 
     static struct option long_options[] = {
         {"type",      required_argument, 0, 't'},
@@ -309,6 +318,7 @@ int main(int argc, char* argv[]) {
         {"output",    required_argument, 0, 'o'},
         {"off",       required_argument, 0, 'f'},
         {"no-seq",    no_argument,       0, 1002},
+        {"no-gpu",    no_argument,       0, 1005},
         {"save-mesh", required_argument, 0, 1001},
         {"help",      no_argument,       0, 'h'},
         {0, 0, 0, 0}
@@ -341,6 +351,7 @@ int main(int argc, char* argv[]) {
             case 'f': input_off = optarg; break;
             case 1001: save_mesh_path = optarg; break;
             case 1002: run_sequential = false; break;
+            case 1005: run_gpu = false; break;
             case 'h':
             default:
                 print_help(argv[0]);
@@ -389,7 +400,7 @@ int main(int argc, char* argv[]) {
         uint64_t current_seed = seeds_list[0];
         BenchmarkComparison comp = run_benchmark_instance(
             mesh_type, requested_size, current_seed, num_runs, input_off, save_mesh_path,
-            run_sequential, cpu_threads, affinity_desc, affinity_cores, meta);
+            run_sequential, run_gpu, cpu_threads, affinity_desc, affinity_cores, meta);
 
         comp.print_table(std::cout);
 
@@ -412,7 +423,7 @@ int main(int argc, char* argv[]) {
         comp.save_json(json_file);
         comp.save_txt(txt_file);
 
-        return (comp.cpu_stats.success && comp.gpu_stats.success) ? 0 : 1;
+        return (comp.cpu_stats.success && (!run_gpu || comp.gpu_stats.success)) ? 0 : 1;
     } else {
         // Multi-seed execution
         MultiSeedSummary summary;
@@ -425,7 +436,7 @@ int main(int argc, char* argv[]) {
             std::cout << "\n>>> [Seed " << (i + 1) << "/" << seeds_list.size() << ": " << current_seed << "] <<<\n";
             BenchmarkComparison comp = run_benchmark_instance(
                 mesh_type, requested_size, current_seed, num_runs, input_off, save_mesh_path,
-                run_sequential, cpu_threads, affinity_desc, affinity_cores, meta);
+                run_sequential, run_gpu, cpu_threads, affinity_desc, affinity_cores, meta);
 
             std::string safe_type = (mesh_type == "grid" || mesh_type == "uniform") ? mesh_type : "custom";
             std::string seed_base = "results/benchmark_" + safe_type + "_" + std::to_string(requested_size) + "_seed" + std::to_string(current_seed);

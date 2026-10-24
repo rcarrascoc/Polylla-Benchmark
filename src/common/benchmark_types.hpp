@@ -316,6 +316,7 @@ struct BenchmarkComparison {
     PolyllaStats cpu_stats;       // OpenMP Data (branch main)
     bool has_task = false;
     PolyllaStats task_stats;      // OpenMP Tasks (branch Task)
+    bool has_gpu = false;
     PolyllaStats gpu_stats;       // CUDA GPU
 
     SystemMetadata meta;
@@ -621,6 +622,7 @@ struct BenchmarkComparison {
             << "  \"has_sequential_baseline\": " << (has_seq ? "true" : "false") << ",\n"
             << "  \"has_omp_dcel\": " << (has_dcel ? "true" : "false") << ",\n"
             << "  \"has_omp_task\": " << (has_task ? "true" : "false") << ",\n"
+            << "  \"has_gpu\": " << (has_gpu ? "true" : "false") << ",\n"
             << "  \"speedup_gpu_vs_sequential\": " << speedup_gpu_vs_seq << ",\n"
             << "  \"speedup_gpu_with_copies_vs_sequential\": " << speedup_gpu_with_copies_vs_seq << ",\n"
             << "  \"speedup_omp_dcel_vs_sequential\": " << speedup_dcel_vs_seq << ",\n"

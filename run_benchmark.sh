@@ -26,7 +26,13 @@ if [ ! -f "${BINARY}" ]; then
     echo "[PPolylla] Build successful!"
 fi
 
-# Check if user requested sweep or plotting via Python
+# Check if user requested OpenMP cores / thread scalability benchmark
+if [[ "$*" == *"--cores-sweep"* ]] || [[ "$*" == *"--threads-sweep"* ]] || [[ "$*" == *"--scaling"* ]] || [[ "$*" == *"--cores-benchmark"* ]]; then
+    python3 "${SCRIPT_DIR}/scripts/benchmark_cores.py" "$@"
+    exit 0
+fi
+
+# Check if user requested size sweep or plotting via Python
 if [[ "$*" == *"--sweep"* ]] || [[ "$*" == *"--plot"* ]] || [[ "$*" == *"--plot-only"* ]]; then
     python3 "${SCRIPT_DIR}/scripts/benchmark.py" "$@"
     exit 0
