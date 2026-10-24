@@ -2,10 +2,12 @@
 """
 PPolylla OpenMP Cores & Thread Scalability Plotting Tool
 Generates standalone strong-scaling visualizations for OpenMP variants:
-  1. cores_time_<type>_<size>.{png,pdf}: Execution Time (ms) vs Number of Threads.
-  2. cores_speedup_<type>_<size>.{png,pdf}: Speedup vs Sequential Baseline vs Number of Threads.
-  3. cores_self_speedup_<type>_<size>.{png,pdf}: Self-Speedup (T(1) / T(p)) vs Number of Threads.
-  4. cores_efficiency_<type>_<size>.{png,pdf}: Parallel Efficiency (%) vs Number of Threads.
+  1. cores_<type>_<size>_time.{png,pdf}: Execution Time (ms) vs Number of Threads (Line chart).
+  2. cores_<type>_<size>_time_bar.{png,pdf}: Execution Time (ms) vs Number of Threads (Grouped Bar chart).
+  3. cores_<type>_<size>_time_bar_log.{png,pdf}: Execution Time (ms) vs Number of Threads (Logarithmic Bar chart).
+  4. cores_<type>_<size>_speedup.{png,pdf}: Speedup vs Sequential Baseline vs Number of Threads.
+  5. cores_<type>_<size>_self_speedup.{png,pdf}: Self-Speedup (T(1) / T(p)) vs Number of Threads.
+  6. cores_<type>_<size>_efficiency.{png,pdf}: Parallel Efficiency (%) vs Number of Threads.
 
 Complies with publication standards: TrueType (Type 42) fonts, 1:1 square ratio,
 2-column legend below the plot, and optional title omission for LaTeX paper integration.
@@ -224,8 +226,93 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
     plt.close(fig)
 
     # -------------------------------------------------------------------------
-    # 2. SPEEDUP VS SEQUENTIAL BASELINE PLOT
+    # 1b. TIME BAR PLOT (Grouped Bar Chart: Execution Time vs Threads)
     # -------------------------------------------------------------------------
+    x_indices = np.arange(len(threads_series))
+    bar_variants = []
+    if dcel_time_col:
+        bar_variants.append({
+            "col": dcel_time_col,
+            "std": dcel_std_col,
+            "label": "MPolylla DCEL",
+            "color": "#ff7f0e",
+        })
+    if data_time_col:
+        bar_variants.append({
+            "col": data_time_col,
+            "std": data_std_col,
+            "label": "MPolylla Data",
+            "color": "#1f77b4",
+        })
+    if task_time_col:
+        bar_variants.append({
+            "col": task_time_col,
+            "std": task_std_col,
+            "label": "MPolylla Task",
+            "color": "#9467bd",
+        })
+
+    n_bars = len(bar_variants)
+    total_group_width = 0.74
+    bar_w = total_group_width / max(1, n_bars)
+
+    def draw_time_bars(ax, log_scale=False):
+        for idx, v in enumerate(bar_variants):
+            offset = (idx - (n_bars - 1) / 2.0) * bar_w
+            times = df[v["col"]].values
+            stds = df[v["std"]].values if (v["std"] and v["std"] in df.columns) else None
+            yerr = stds if (stds is not None and (stds > 0).any()) else None
+
+            ax.bar(
+                x_indices + offset, times, width=bar_w * 0.92,
+                yerr=yerr, capsize=2.5, error_kw={"elinewidth": 0.9, "ecolor": "#333333"},
+                label=v["label"], color=v["color"], edgecolor="white", linewidth=0.6, zorder=3
+            )
+
+        if has_seq:
+            ax.axhline(seq_time_val, color="#7f7f7f", linestyle="--", linewidth=1.5,
+                       label=f"Polylla-Mesh-DCEL ({seq_time_val:.1f} ms)", zorder=4)
+
+        if has_gpu:
+            ax.axhline(gpu_time_val, color="#2ca02c", linestyle=":", linewidth=1.8,
+                       label=f"GPolylla ({gpu_time_val:.1f} ms)", zorder=4)
+
+        ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
+        ax.set_xticks(x_indices)
+        ax.set_xticklabels([str(t) for t in threads_series])
+        if log_scale:
+            ax.set_yscale("log")
+            ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=10.5, fontweight="bold")
+            ax.grid(True, which="both", linestyle="--", alpha=0.6, axis="y", zorder=0)
+        else:
+            ax.set_ylabel("Execution Time (ms)", fontsize=10.5, fontweight="bold")
+            ax.grid(True, linestyle="--", alpha=0.6, axis="y", zorder=0)
+
+    # 1b.1 Linear Bar Chart
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
+    draw_time_bars(ax, log_scale=False)
+    if show_title:
+        ax.set_title(f"OpenMP Polylla Execution Time vs Cores\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
+    fig.tight_layout()
+    for fmt in formats:
+        bar_path = output_dir / f"{prefix}_time_bar.{fmt}"
+        fig.savefig(bar_path, bbox_inches="tight", dpi=300)
+        print(f"  [+] Saved Cores Time Bar Plot:     {bar_path}")
+    plt.close(fig)
+
+    # 1b.2 Logarithmic Bar Chart
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
+    draw_time_bars(ax, log_scale=True)
+    if show_title:
+        ax.set_title(f"OpenMP Polylla Execution Time vs Cores (Log Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
+    fig.tight_layout()
+    for fmt in formats:
+        bar_log_path = output_dir / f"{prefix}_time_bar_log.{fmt}"
+        fig.savefig(bar_log_path, bbox_inches="tight", dpi=300)
+        print(f"  [+] Saved Cores Time Bar Log Plot: {bar_log_path}")
+    plt.close(fig)
     if has_seq:
         fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
         endpoints = []
