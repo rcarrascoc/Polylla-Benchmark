@@ -64,7 +64,11 @@ def run_single(mesh_type: str, size: int, seed: int, runs: int = 1, threads: int
     print(f"\n[Run] Executing: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT)
     if result.returncode != 0:
-        print(f"[Error] Benchmark run failed with return code {result.returncode}")
+        if result.returncode == -9:
+            print(f"[Error] Benchmark run failed with return code -9 (SIGKILL / Out-Of-Memory Killer).")
+            print(f"        The system ran out of RAM! The kernel killed the process. Try reducing --size.")
+        else:
+            print(f"[Error] Benchmark run failed with return code {result.returncode}")
         return None
 
     if output_json.exists():

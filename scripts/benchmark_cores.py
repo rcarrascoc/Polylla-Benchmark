@@ -77,12 +77,37 @@ def get_default_threads(cores_spec: str = "") -> list:
         res.append(total_cpus)
         return sorted(list(set(res)))
 
+def check_ram_capacity(size: int) -> bool:
+    """Checks if requested mesh size fits safely within available physical RAM."""
+    try:
+        total_ram_bytes = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+        total_ram_gb = total_ram_bytes / (1024**3)
+    except Exception:
+        total_ram_gb = 32.0
+
+    # DCEL and MeshGen peak memory is approx 460-480 bytes per vertex
+    needed_gb = (size * 460) / (1024**3)
+    if needed_gb > total_ram_gb * 0.80:
+        max_safe = max(1000000, int((total_ram_gb * 0.65 * (1024**3)) / 460) // 5000000 * 5000000)
+        print("\n" + "!" * 110)
+        print(f"  [RAM WARNING] Requested size N={size:,} requires approx {needed_gb:.1f} GB of RAM.")
+        print(f"                This system has only {total_ram_gb:.1f} GB physical RAM.")
+        print(f"                Algorithms (especially DCEL) will exceed RAM and be terminated by Linux OOM Killer (code -9).")
+        print(f"  --> Recommended maximum size on this system: ~{max_safe:,} vertices (e.g. 10M, 20M, or 40M).")
+        print("!" * 110 + "\n")
+        return False
+    return True
+
 def run_cmd(cmd: list) -> dict:
     """Executes benchmark binary and returns parsed JSON data."""
     print(f"\n[Run] Executing: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT)
     if result.returncode != 0:
-        print(f"[Error] Benchmark run failed with return code {result.returncode}")
+        if result.returncode == -9:
+            print(f"[Error] Benchmark run failed with return code -9 (SIGKILL / Out-Of-Memory Killer).")
+            print(f"        The system ran out of RAM! The kernel killed the process. Try reducing --size.")
+        else:
+            print(f"[Error] Benchmark run failed with return code {result.returncode}")
         return None
 
     # Find the output json file
@@ -115,6 +140,8 @@ def run_cores_benchmark(mesh_type: str = "uniform", size: int = 1000000,
 
     if threads_list is None or len(threads_list) == 0:
         threads_list = get_default_threads(cores_spec)
+
+    check_ram_capacity(size)
 
     print("\n" + "=" * 110)
     print("                  PPolylla OpenMP Cores & Thread Scalability Benchmark Suite                  ")
