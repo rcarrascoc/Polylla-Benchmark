@@ -10,7 +10,11 @@ BUILD_DIR="${SCRIPT_DIR}/build"
 BINARY="${BUILD_DIR}/ppolylla_benchmark"
 
 # Check submodules
-if [ ! -f "${SCRIPT_DIR}/submodules/GPolylla/CMakeLists.txt" ] || [ ! -f "${SCRIPT_DIR}/submodules/MPolylla/CMakeLists.txt" ] || [ ! -f "${SCRIPT_DIR}/submodules/MPolylla-Mesh-DCEL/CMakeLists.txt" ]; then
+if [ ! -f "${SCRIPT_DIR}/submodules/GPolylla/CMakeLists.txt" ] || \
+   [ ! -f "${SCRIPT_DIR}/submodules/MPolylla/CMakeLists.txt" ] || \
+   [ ! -f "${SCRIPT_DIR}/submodules/Polylla-Mesh-DCEL/CMakeLists.txt" ] || \
+   [ ! -f "${SCRIPT_DIR}/submodules/MPolylla-Task/CMakeLists.txt" ] || \
+   [ ! -f "${SCRIPT_DIR}/submodules/MPolylla-Mesh-DCEL/CMakeLists.txt" ]; then
     echo "[PPolylla] Initializing and updating git submodules..."
     git submodule update --init --recursive
 fi
@@ -20,7 +24,8 @@ if [ ! -f "${BINARY}" ]; then
     echo "[PPolylla] Binary not found. Building project with CMake..."
     mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"
-    cmake -DCMAKE_CUDA_ARCHITECTURES=89 ..
+    CUDA_ARCH="${CUDA_ARCH:-native}"
+    cmake -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" ..
     make -j$(nproc)
     cd "${SCRIPT_DIR}"
     echo "[PPolylla] Build successful!"

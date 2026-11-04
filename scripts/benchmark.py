@@ -29,10 +29,22 @@ def ensure_built():
     """Compiles the benchmark executable if it does not exist."""
     BUILD_DIR.mkdir(exist_ok=True)
     if not BINARY.exists():
-        print(f"[Build] {BINARY} not found. Running CMake and Make...")
-        cmd_cmake = ["cmake", "-DCMAKE_CUDA_ARCHITECTURES=89", ".."]
+        required_submodules = [
+            PROJECT_ROOT / "submodules/GPolylla/CMakeLists.txt",
+            PROJECT_ROOT / "submodules/MPolylla/CMakeLists.txt",
+            PROJECT_ROOT / "submodules/Polylla-Mesh-DCEL/CMakeLists.txt",
+            PROJECT_ROOT / "submodules/MPolylla-Task/CMakeLists.txt",
+            PROJECT_ROOT / "submodules/MPolylla-Mesh-DCEL/CMakeLists.txt",
+        ]
+        if any(not p.exists() for p in required_submodules):
+            print("[Submodules] Initializing and updating git submodules...")
+            subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=PROJECT_ROOT)
+
+        cuda_arch = os.environ.get("CUDA_ARCH", "native")
+        print(f"[Build] {BINARY} not found. Running CMake (CUDA_ARCH={cuda_arch}) and Make...")
+        cmd_cmake = ["cmake", f"-DCMAKE_CUDA_ARCHITECTURES={cuda_arch}", ".."]
         subprocess.check_call(cmd_cmake, cwd=BUILD_DIR)
-        cmd_make = ["make", f"-j{os.cpu_count()}"]
+        cmd_make = ["make", f"-j{os.cpu_count() or 1}"]
         subprocess.check_call(cmd_make, cwd=BUILD_DIR)
         print("[Build] Build completed successfully.\n")
 
