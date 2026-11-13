@@ -1,110 +1,113 @@
-# PPolylla: Benchmark Comparativo de Algoritmos Paralelos de Polylla
+# Polylla: Comparative Benchmark of Parallel Polylla Algorithms
 
-Suite de benchmark y análisis de rendimiento para comparar cuatro implementaciones del algoritmo **Polylla**:
-1. **CPU Secuencial (Baseline)**: [ssalinasfe/Polylla-Mesh-DCEL](https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git)
-2. **CPU Multi-core (OpenMP Loops)**: [rcarrascoc/MPolylla](https://github.com/rcarrascoc/MPolylla.git) (rama `main`)
-3. **CPU Multi-core (OpenMP Tasks)**: [rcarrascoc/MPolylla](https://github.com/rcarrascoc/MPolylla.git) (rama `Task`)
+Benchmark suite and performance analysis to compare four implementations of the **Polylla** algorithm:
+1. **Sequential CPU (Baseline)**: [ssalinasfe/Polylla-Mesh-DCEL](https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git)
+2. **Multi-core CPU (OpenMP Loops)**: [rcarrascoc/MPolylla](https://github.com/rcarrascoc/MPolylla.git) (`main` branch)
+3. **Multi-core CPU (OpenMP Tasks)**: [rcarrascoc/MPolylla](https://github.com/rcarrascoc/MPolylla.git) (`Task` branch)
 4. **GPU (CUDA)**: [ssalinasfe/GPolylla](https://github.com/ssalinasfe/GPolylla.git)
 
-El sistema genera los datasets de prueba (mallas de triángulos) **directamente en memoria (RAM)** compartida para asegurar que las cuatro implementaciones evalúen exactamente el mismo conjunto de vértices y caras, admitiendo una semilla (`seed`) para reproducir los experimentos al 100%.
+The system generates benchmark datasets (triangle meshes) **directly in shared memory (RAM)** to ensure that all four implementations evaluate the exact same set of vertices and faces, supporting a random seed (`seed`) for 100% reproducible experiments.
 
 ---
 
-## 🚀 Características Principales
+## 🚀 Key Features
 
-- **Submódulos Aislados**: Los repositorios originales se integran como submódulos de Git en el directorio `submodules/`:
-  - `submodules/Polylla-Mesh-DCEL` (Baseline secuencial)
-  - `submodules/MPolylla` (Paralelo OpenMP Loops - rama `main`)
-  - `submodules/MPolylla-Task` (Paralelo OpenMP Tasks - rama `Task`)
-  - `submodules/GPolylla` (Paralelo CUDA GPU)
-  Manteniendo `src/` limpio y desacoplado mediante librerías compartidas independientes (`libseq_runner.so`, `libmpolylla_runner.so`, `libmpolylla_task_runner.so`, `libgpolylla_runner.so`).
-- **Generación en Memoria (Zero Disk Overhead)**:
-  - **Grilla (`grid`)**: Malla estructurada regular de $k \times k$ vértices con división diagonal idéntica a la usada en las publicaciones de GPolylla.
-  - **Uniforme (`uniform`)**: Puntos distribuidos uniformemente en $[0, 1] \times [0, 1]$ con ajuste a los bordes (`move_point`) y triangulación de Delaunay en memoria en apenas milisegundos gracias a `delaunator-cpp`.
-- **Reproducibilidad Exacta**: Parámetro `--seed` para replicar con precisión las distribuciones uniformes.
-- **Rescate y Desglose Completo de Timers**:
-  1. Construcción de estructura de datos de triangulación (`time_triangulation_generation`)
-  2. Etiquetado de aristas máximas (`d_time_to_label_max_edges`)
-  3. Etiquetado de aristas frontera (`d_time_to_label_frontier_edges`)
-  4. Etiquetado de aristas semilla (`d_time_to_label_seed_edges`)
-  5. Reparación de aristas frontera adicionales (`d_time_to_label_extra_frontier_edge`)
-  6. Recorrido / Traversal fase 1 (`d_time_to_traversal`)
-  7. Recorrido fase 2 / Búsqueda frontera (`d_time_to_traversal_search_frontier_edge`)
-  8. Sobrescritura de semillas (`d_time_to_overwrite_seed`)
-  9. Escaneo prefijo de semillas (`d_time_to_label_scan_edges`)
-  10. Compactación de semillas (`d_time_to_label_compaction_edges`)
-  - Transferencias host-device (`d_time_copy_to_device`, `d_time_to_back_to_host`)
-  - **Speedup GPU vs Secuencial Baseline** (con y sin transferencias)
-  - **Speedup OpenMP (Loops) vs Secuencial Baseline**
-  - **Speedup OpenMP (Tasks) vs Secuencial Baseline**
-  - **Speedup OpenMP (Tasks) vs OpenMP (Loops)**
-  - **Speedup GPU vs OpenMP (Loops y Tasks)**
-- **Exportación Automática en `.txt` y `.json`**: Genera un informe legible con metadata exhaustiva de hardware (CPU, GPU, RAM, OS, CUDA), commits exactos de cada submódulo y parámetros de ejecución.
-- **Ejecución con un solo comando**: Script `./run_benchmark.sh` y CLI `scripts/benchmark.py` con soporte para barridos (*sweeps*) automáticos, tablas CSV y generación de gráficos con Matplotlib.
+- **Isolated Submodules**: Original repositories are integrated as Git submodules in the `submodules/` directory:
+  - `submodules/Polylla-Mesh-DCEL` (Sequential baseline)
+  - `submodules/MPolylla` (OpenMP Loops parallel - `main` branch)
+  - `submodules/MPolylla-Task` (OpenMP Tasks parallel - `Task` branch)
+  - `submodules/GPolylla` (CUDA GPU parallel)
+  Keeping `src/` clean and decoupled through independent shared libraries (`libseq_runner.so`, `libmpolylla_runner.so`, `libmpolylla_task_runner.so`, `libgpolylla_runner.so`).
+- **In-Memory Generation (Zero Disk Overhead)**:
+  - **Grid (`grid`)**: Regular structured mesh of $k \times k$ vertices with diagonal division identical to the one used in GPolylla publications.
+  - **Uniform (`uniform`)**: Uniformly distributed points in $[0, 1] \times [0, 1]$ with boundary snapping (`move_point`) and in-memory Delaunay triangulation completed in milliseconds thanks to `delaunator-cpp`.
+- **Exact Reproducibility**: `--seed` parameter to accurately replicate uniform distributions.
+- **Comprehensive Timer Breakdown**:
+  1. Triangulation data structure construction (`time_triangulation_generation`)
+  2. Label maximum edges (`d_time_to_label_max_edges`)
+  3. Label frontier edges (`d_time_to_label_frontier_edges`)
+  4. Label seed edges (`d_time_to_label_seed_edges`)
+  5. Repair extra frontier edges (`d_time_to_label_extra_frontier_edge`)
+  6. Traversal phase 1 (`d_time_to_traversal`)
+  7. Traversal phase 2 / Frontier search (`d_time_to_traversal_search_frontier_edge`)
+  8. Seed overwriting (`d_time_to_overwrite_seed`)
+  9. Prefix scan of seed edges (`d_time_to_label_scan_edges`)
+  10. Seed compaction (`d_time_to_label_compaction_edges`)
+  - Host-device transfers (`d_time_copy_to_device`, `d_time_to_back_to_host`)
+  - **GPU vs Sequential Baseline Speedup** (with and without memory transfers)
+  - **OpenMP (Loops) vs Sequential Baseline Speedup**
+  - **OpenMP (Tasks) vs Sequential Baseline Speedup**
+  - **OpenMP (Tasks) vs OpenMP (Loops) Speedup**
+  - **GPU vs OpenMP (Loops and Tasks) Speedup**
+- **Automatic Export to `.txt` and `.json`**: Generates a human-readable report with exhaustive hardware metadata (CPU, GPU, RAM, OS, CUDA), exact commit hashes of each submodule, and run parameters.
+- **Single-Command Execution**: `./run_benchmark.sh` script and `scripts/benchmark.py` CLI supporting automated parameter sweeps, CSV summary tables, and Matplotlib plot generation.
 
 ---
 
-## 📁 Estructura del Proyecto
+## 📁 Project Structure
 
 ```
 PPolylla/
-├── CMakeLists.txt              # Configuración de compilación CMake (C++14, CUDA sm_89/native, OpenMP)
-├── run_benchmark.sh            # Script ejecutable principal de benchmark
-├── README.md                   # Documentación del proyecto
-├── submodules/                 # Submódulos externos (repositorios remotos)
-│   ├── Polylla-Mesh-DCEL/      # Baseline secuencial en CPU
-│   ├── MPolylla/               # Implementación CPU (OpenMP Loops - rama main)
-│   ├── MPolylla-Task/          # Implementación CPU (OpenMP Tasks - rama Task)
-│   └── GPolylla/               # Implementación GPU (CUDA)
-├── src/                        # Código fuente de la suite de benchmark
+├── CMakeLists.txt              # CMake build configuration (C++14, CUDA sm_89/native, OpenMP)
+├── run_benchmark.sh            # Main benchmark runner script
+├── README.md                   # Project documentation
+├── submodules/                 # External submodules (remote repositories)
+│   ├── Polylla-Mesh-DCEL/      # Sequential CPU baseline
+│   ├── MPolylla/               # CPU implementation (OpenMP Loops - main branch)
+│   ├── MPolylla-Task/          # CPU implementation (OpenMP Tasks - Task branch)
+│   └── GPolylla/               # GPU implementation (CUDA)
+├── src/                        # Benchmark suite source code
 │   ├── common/
-│   │   └── benchmark_types.hpp # Estructuras de datos, timers, metadata, TXT y JSON
+│   │   └── benchmark_types.hpp # Data structures, timers, metadata, TXT and JSON
 │   ├── generators/
-│   │   ├── delaunator.hpp         # Triangulador de Delaunay 2D ultra-rápido en C++
-│   │   └── mesh_generator.hpp     # Generadores en memoria de mallas (grid y uniform)
+│   │   ├── delaunator.hpp         # Ultra-fast 2D Delaunay triangulator in C++
+│   │   └── mesh_generator.hpp     # In-memory mesh generators (grid and uniform)
 │   ├── runners/
-│   │   ├── seq_runner.hpp / .cpp     # Envoltorio de Polylla-Mesh-DCEL en libseq_runner.so
-│   │   ├── cpu_runner.hpp / .cpp     # Envoltorio de MPolylla Loops en libmpolylla_runner.so
-│   │   ├── cpu_task_runner.hpp / .cpp# Envoltorio de MPolylla Tasks en libmpolylla_task_runner.so
-│   │   └── gpu_runner.hpp / .cu    # Envoltorio de GPolylla en libgpolylla_runner.so
-│   └── main.cpp                # Ejecutable principal C++ de benchmark
+│   │   ├── seq_runner.hpp / .cpp     # Polylla-Mesh-DCEL wrapper in libseq_runner.so
+│   │   ├── cpu_runner.hpp / .cpp     # MPolylla Loops wrapper in libmpolylla_runner.so
+│   │   ├── cpu_task_runner.hpp / .cpp# MPolylla Tasks wrapper in libmpolylla_task_runner.so
+│   │   └── gpu_runner.hpp / .cu    # GPolylla wrapper in libgpolylla_runner.so
+│   └── main.cpp                # Main C++ benchmark executable
 ├── scripts/
-│   └── benchmark.py            # Orquestador Python para barridos (sweeps) y gráficos
-├── results/                    # Resultados de benchmarks en TXT, JSON y CSV
-└── plots/                      # Gráficos generados (PNG)
+│   └── benchmark.py            # Python orchestrator for sweeps and plotting
+├── results/                    # Benchmark results in TXT, JSON, and CSV
+└── plots/                      # Generated plots (PNG)
 ```
 
 ---
 
-## 🖥️ Uso Rápido (Un Solo Comando)
+## 🖥️ Quick Start (Single Command)
 
-### 1. Benchmark Individual Completo (Secuencial vs OpenMP Loops vs Tasks vs GPU)
+### 1. Full Single Benchmark (Sequential vs OpenMP Loops vs Tasks vs GPU)
 
 ```bash
-# Malla uniforme de 100,000 vértices con semilla 42
+# Uniform mesh with 100,000 vertices and seed 42
 ./run_benchmark.sh --type uniform --size 100000 --seed 42
 
-# Malla de grilla de 1,000,000 puntos (omitiendo secuencial para acelerar)
+# Grid mesh with 1,000,000 vertices (skipping sequential to speed up run)
 ./run_benchmark.sh --type grid --size 1000000 --no-seq
+
+# Run only the CPU variants (skip GPU)
+./run_benchmark.sh --type uniform --size 100000 --no-gpu
 ```
 
-### 2. Barrido Automático de Tamaños y Gráficos
+### 2. Automated Size Sweep and Plotting
 
-Para evaluar múltiples tamaños (ej. 10k, 50k, 100k vértices):
+To evaluate multiple sizes (e.g., 10k, 50k, 100k vertices):
 
 ```bash
 ./run_benchmark.sh --sweep --type uniform --sizes 10000,50000,100000 --seed 42
 ```
 
-Salida generada:
-- Reportes individuales legibles en `results/*.txt` y estructurados en `results/*.json`
-- Tabla consolidada CSV en `results/sweep_uniform_seed42.csv`
-- Gráfico de Speedup en `plots/speedup_uniform.png`
-- Gráfico de Tiempo en `plots/time_uniform.png` (curvas en escala logarítmica)
+Generated output:
+- Human-readable individual reports in `results/*.txt` and structured in `results/*.json`
+- Consolidated CSV table in `results/sweep_uniform_seed42.csv`
+- Speedup plot in `plots/speedup_uniform.png`
+- Runtime plot in `plots/time_uniform.png` (log-scale curves)
 
 ---
 
-## 📊 Ejemplo de Salida en Terminal
+## 📊 Sample Terminal Output
 
 ```
 ======================================================================================================================================
@@ -155,18 +158,19 @@ Salida generada:
 
 ---
 
-## 🔧 Opciones Disponibles de la Línea de Comandos
+## 🔧 Command-Line Options
 
-| Opción | Descripción | Valor por Defecto |
+| Option | Description | Default |
 | :--- | :--- | :--- |
-| `-t, --type <grid\|uniform>` | Tipo de malla a generar en memoria | `uniform` |
-| `-s, --size <N>` | Cantidad de vértices solicitados | `100000` |
-| `-r, --seed <SEED>` | Semilla del generador pseudoaleatorio | `42` |
-| `-j, --threads <T>` | Hilos OpenMP para CPU (0 = todos los núcleos detectados) | `0` |
-| `-o, --output <PATH>` | Ruta del archivo JSON de salida | `results/benchmark_...json` |
-| `-f, --off <FILE>` | Usar un archivo `.off` existente en lugar de generar en memoria | Ninguno |
-| `--no-seq` | Omitir el baseline secuencial en CPU | `false` (ejecuta los 3) |
-| `--save-mesh <PATH>` | Guarda la malla generada en un archivo `.off` persistente | Ninguno |
-| `--sweep` | Activa el modo barrido múltiple a través del script Python | `false` |
-| `--sizes <N1,N2,...>` | Lista separada por comas de tamaños para el barrido | `10k,50k,100k,500k,1M` |
-| `-h, --help` | Muestra el menú de ayuda | - |
+| `-t, --type <grid\|uniform>` | Mesh type to generate in memory | `uniform` |
+| `-s, --size <N>` | Number of requested vertices | `100000` |
+| `-r, --seed <SEED>` | Pseudorandom generator seed | `42` |
+| `-j, --threads <T>` | OpenMP threads for CPU (0 = all detected cores) | `0` |
+| `-o, --output <PATH>` | Output JSON file path | `results/benchmark_...json` |
+| `-f, --off <FILE>` | Use an existing `.off` file instead of generating in memory | None |
+| `--no-seq` | Skip the sequential CPU baseline | `false` |
+| `--no-gpu` | Skip the CUDA GPU variant (runs CPU variants only) | `false` |
+| `--save-mesh <PATH>` | Save generated mesh to a persistent `.off` file | None |
+| `--sweep` | Enable multi-size sweep mode via Python script | `false` |
+| `--sizes <N1,N2,...>` | Comma-separated list of sizes for the sweep | `10k,50k,100k,500k,1M` |
+| `-h, --help` | Display help menu | - |

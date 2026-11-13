@@ -24,8 +24,12 @@ if [ ! -f "${BINARY}" ]; then
     echo "[PPolylla] Binary not found. Building project with CMake..."
     mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"
+    EXTRA_CMAKE_ARGS=()
+    if [[ "$*" == *"--no-gpu"* ]] || [ "${NO_CUDA:-0}" = "1" ]; then
+        EXTRA_CMAKE_ARGS+=("-DENABLE_CUDA=OFF")
+    fi
     CUDA_ARCH="${CUDA_ARCH:-native}"
-    cmake -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" ..
+    cmake -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" "${EXTRA_CMAKE_ARGS[@]}" ..
     make -j$(nproc)
     cd "${SCRIPT_DIR}"
     echo "[PPolylla] Build successful!"

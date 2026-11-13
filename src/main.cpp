@@ -12,7 +12,9 @@
 #include "src/common/cpu_affinity.hpp"
 #include "src/generators/mesh_generator.hpp"
 #include "src/runners/seq_runner.hpp"
+#ifdef ENABLE_CUDA
 #include "src/runners/gpu_runner.hpp"
+#endif
 #include "src/runners/cpu_dcel_runner.hpp"
 #include "src/runners/cpu_runner.hpp"
 #include "src/runners/cpu_task_runner.hpp"
@@ -254,6 +256,7 @@ BenchmarkComparison run_benchmark_instance(
 
     // 5. GPU CUDA
     if (run_gpu) {
+#ifdef ENABLE_CUDA
         std::cout << "\n------------------------------------------------------------------------\n"
                   << "  [5/5] RUNNING GPU BENCHMARK (ssalinasfe/GPolylla - CUDA"
                   << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
@@ -283,6 +286,10 @@ BenchmarkComparison run_benchmark_instance(
                           << comp.gpu_stats.time_total_algorithm_std << " ms\n";
             }
         }
+#else
+        std::cout << "\n[Info] GPU benchmark skipped (binary compiled with -DENABLE_CUDA=OFF)\n";
+        comp.has_gpu = false;
+#endif
     } else {
         std::cout << "\n[Info] Skipping GPU benchmark (--no-gpu requested)\n";
         comp.has_gpu = false;
@@ -304,7 +311,11 @@ int main(int argc, char* argv[]) {
     std::string input_off = "";
     std::string save_mesh_path = "";
     bool run_sequential = true;
+#ifdef ENABLE_CUDA
     bool run_gpu = true;
+#else
+    bool run_gpu = false;
+#endif
 
     static struct option long_options[] = {
         {"type",      required_argument, 0, 't'},

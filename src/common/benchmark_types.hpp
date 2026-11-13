@@ -399,7 +399,12 @@ struct BenchmarkComparison {
            << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
 
         auto print_elem = [&](const char* name, long long seq, long long dcel, long long omp, long long task, long long gpu) {
-            bool all_parallel_match = (omp == gpu && (!has_task || task == gpu) && (!has_dcel || dcel == gpu));
+            bool all_parallel_match;
+            if (has_gpu) {
+                all_parallel_match = (omp == gpu && (!has_task || task == gpu) && (!has_dcel || dcel == gpu));
+            } else {
+                all_parallel_match = ((!has_task || task == omp) && (!has_dcel || dcel == omp));
+            }
             std::string status = all_parallel_match ? "MATCH (All Parallel)" : "DIFF (Parallel)";
             if (has_seq && (seq != omp || (has_task && seq != task) || (has_dcel && seq != dcel))) status += "*";
             os << "  " << std::left << std::setw(25) << name
@@ -407,7 +412,7 @@ struct BenchmarkComparison {
                << "  " << std::right << std::setw(15) << (has_dcel ? std::to_string(dcel) : "-")
                << "  " << std::right << std::setw(15) << omp
                << "  " << std::right << std::setw(15) << (has_task ? std::to_string(task) : "-")
-               << "  " << std::right << std::setw(14) << gpu
+               << "  " << std::right << std::setw(14) << (has_gpu ? std::to_string(gpu) : "-")
                << "  " << std::right << std::setw(23) << status
                << "\n";
         };
@@ -417,27 +422,33 @@ struct BenchmarkComparison {
         print_elem("Half-Edges (n_half_edges)", seq_stats.n_half_edges, dcel_stats.n_half_edges, cpu_stats.n_half_edges, task_stats.n_half_edges, gpu_stats.n_half_edges);
         print_elem("Polygons (n_polygons)", seq_stats.n_polygons, dcel_stats.n_polygons, cpu_stats.n_polygons, task_stats.n_polygons, gpu_stats.n_polygons);
 
+        std::string sp_hdr = has_gpu ? "Speedup GPolylla/Base" : " Speedup Data/Base  ";
         if (runs > 1) {
             os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
-               << "  Phase Timers (ms, avg " << runs << " runs)  Polylla-Mesh-DCEL    MPolylla DCEL    MPolylla Data    MPolylla Task        GPolylla       Speedup GPolylla/Base       \n"
+               << "  Phase Timers (ms, avg " << runs << " runs)  Polylla-Mesh-DCEL    MPolylla DCEL    MPolylla Data    MPolylla Task        GPolylla       " << sp_hdr << " \n"
                << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         } else {
             os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
-               << "  Phase Timers (ms)            Polylla-Mesh-DCEL    MPolylla DCEL    MPolylla Data    MPolylla Task        GPolylla       Speedup GPolylla/Base       \n"
+               << "  Phase Timers (ms)            Polylla-Mesh-DCEL    MPolylla DCEL    MPolylla Data    MPolylla Task        GPolylla       " << sp_hdr << " \n"
                << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         }
 
         auto print_timer = [&](const char* name, double seq_t, double dcel_t, double omp_t, double task_t, double gpu_t) {
-            double sp_gpu_seq = (has_seq && gpu_t > 0.0) ? (seq_t / gpu_t) : 0.0;
+            double sp_ref = has_gpu ? ((has_seq && gpu_t > 0.0) ? (seq_t / gpu_t) : 0.0)
+                                    : ((has_seq && omp_t > 0.0) ? (seq_t / omp_t) : 0.0);
             os << "  " << std::left << std::setw(25) << name
                << "  " << std::right << std::setw(17) << std::fixed << std::setprecision(4) << (has_seq ? seq_t : 0.0)
                << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << (has_dcel ? dcel_t : 0.0)
                << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << omp_t
-               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << (has_task ? task_t : 0.0)
-               << "  " << std::right << std::setw(14) << std::fixed << std::setprecision(4) << gpu_t;
-            if (sp_gpu_seq > 0.0) {
+               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << (has_task ? task_t : 0.0);
+            if (has_gpu) {
+                os << "  " << std::right << std::setw(14) << std::fixed << std::setprecision(4) << gpu_t;
+            } else {
+                os << "  " << std::right << std::setw(14) << "-";
+            }
+            if (sp_ref > 0.0) {
                 std::ostringstream ss;
-                ss << std::fixed << std::setprecision(2) << sp_gpu_seq << "x";
+                ss << std::fixed << std::setprecision(2) << sp_ref << "x";
                 os << "  " << std::right << std::setw(24) << ss.str() << "\n";
             } else {
                 os << "  " << std::right << std::setw(25) << "-\n";
@@ -468,23 +479,36 @@ struct BenchmarkComparison {
                << "  " << std::right << std::setw(15) << (has_dcel ? format_std_str(dcel_stats.time_total_algorithm_std) : "-")
                << "  " << std::right << std::setw(15) << format_std_str(cpu_stats.time_total_algorithm_std)
                << "  " << std::right << std::setw(15) << (has_task ? format_std_str(task_stats.time_total_algorithm_std) : "-")
-               << "  " << std::right << std::setw(14) << format_std_str(gpu_stats.time_total_algorithm_std)
+               << "  " << std::right << std::setw(14) << (has_gpu ? format_std_str(gpu_stats.time_total_algorithm_std) : "-")
                << "  " << std::right << std::setw(25) << "-\n";
         }
-        os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
-        os << "  GPU Transfer Host->Device:      " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.d_time_copy_to_device << " ms\n";
-        os << "  GPU Transfer Device->Host:      " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.d_time_to_back_to_host << " ms\n";
-        os << "  GPU TOTAL (Alg + Transfers):    " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.total_with_copies << " ms";
-        if (runs > 1) {
-            os << "  (± " << std::fixed << std::setprecision(4) << gpu_stats.total_with_copies_std << " ms)";
+        if (has_gpu) {
+            os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
+            os << "  GPU Transfer Host->Device:      " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.d_time_copy_to_device << " ms\n";
+            os << "  GPU Transfer Device->Host:      " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.d_time_to_back_to_host << " ms\n";
+            os << "  GPU TOTAL (Alg + Transfers):    " << std::right << std::setw(16) << std::fixed << std::setprecision(4) << gpu_stats.total_with_copies << " ms";
+            if (runs > 1) {
+                os << "  (± " << std::fixed << std::setprecision(4) << gpu_stats.total_with_copies_std << " ms)";
+            }
+            os << "\n";
         }
-        os << "\n";
         os << "----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         std::string c_unit = (cpu_threads == 1 ? "core" : "cores");
         std::string omp_c_str = "(" + std::to_string(cpu_threads) + " " + c_unit + ")";
+        if (has_gpu) {
+            if (has_seq) {
+                os << "  >>> SPEEDUP GPolylla vs Polylla-Mesh-DCEL (Alg only):         " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_seq << "x\n";
+                os << "  >>> SPEEDUP GPolylla vs Polylla-Mesh-DCEL (With Transfers):   " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_with_copies_vs_seq << "x\n";
+            }
+            if (has_dcel) {
+                os << "  >>> SPEEDUP GPolylla vs MPolylla DCEL " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_dcel << "x\n";
+            }
+            os << "  >>> SPEEDUP GPolylla vs MPolylla Data " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_omp << "x\n";
+            if (has_task) {
+                os << "  >>> SPEEDUP GPolylla vs MPolylla Task " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_task << "x\n";
+            }
+        }
         if (has_seq) {
-            os << "  >>> SPEEDUP GPolylla vs Polylla-Mesh-DCEL (Alg only):         " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_seq << "x\n";
-            os << "  >>> SPEEDUP GPolylla vs Polylla-Mesh-DCEL (With Transfers):   " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_with_copies_vs_seq << "x\n";
             if (has_dcel) {
                 os << "  >>> SPEEDUP MPolylla DCEL " << std::left << std::setw(11) << omp_c_str << " vs Polylla-Mesh-DCEL:       " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_dcel_vs_seq << "x\n";
             }
@@ -493,13 +517,11 @@ struct BenchmarkComparison {
                 os << "  >>> SPEEDUP MPolylla Task " << std::left << std::setw(11) << omp_c_str << " vs Polylla-Mesh-DCEL:       " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_seq << "x\n";
             }
         }
-        if (has_dcel) {
-            os << "  >>> SPEEDUP GPolylla vs MPolylla DCEL " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_dcel << "x\n";
-        }
-        os << "  >>> SPEEDUP GPolylla vs MPolylla Data " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_omp << "x\n";
         if (has_task) {
-            os << "  >>> SPEEDUP GPolylla vs MPolylla Task " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_task << "x\n";
             os << "  >>> SPEEDUP MPolylla Task vs MPolylla Data " << std::left << std::setw(11) << omp_c_str << ":           " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_task_vs_omp << "x\n";
+        }
+        if (has_dcel) {
+            os << "  >>> SPEEDUP MPolylla Data vs MPolylla DCEL " << std::left << std::setw(11) << omp_c_str << ":           " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_dcel_vs_omp << "x\n";
         }
         os << "==========================================================================================================================================================\n\n";
     }

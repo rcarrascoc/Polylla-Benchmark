@@ -158,12 +158,14 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     data_std_col = "omp_data_time_std_ms" if "omp_data_time_std_ms" in df.columns and df["omp_data_time_std_ms"].notnull().any() else None
     task_std_col = "omp_tasks_time_std_ms" if "omp_tasks_time_std_ms" in df.columns and df["omp_tasks_time_std_ms"].notnull().any() else None
     gpu_std_col = "gpu_time_std_ms" if "gpu_time_std_ms" in df.columns and df["gpu_time_std_ms"].notnull().any() else None
+    has_gpu = "gpu_time_ms" in df.columns and (df["gpu_time_ms"].fillna(0) > 0).any()
 
     # Compute Speedups strictly over baseline (T_baseline / T_variant)
     has_seq = seq_time_col is not None and (df[seq_time_col] > 0).any()
     if has_seq:
         seq_time = df[seq_time_col]
-        df["calc_speedup_gpu_alg"] = seq_time / df["gpu_time_ms"]
+        if has_gpu:
+            df["calc_speedup_gpu_alg"] = seq_time / df["gpu_time_ms"]
         if dcel_time_col:
             df["calc_speedup_dcel"] = seq_time / df[dcel_time_col]
         if data_time_col:
@@ -194,9 +196,10 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
     # -------------------------------------------------------------------------
     if has_seq:
         def draw_speedup_curves(ax, log_scale=False):
-            ax.plot(df["n_vertices"], df["calc_speedup_gpu_alg"],
-                    marker="o", markersize=6.5, color="#2ca02c", linewidth=2.2,
-                    label="GPolylla")
+            if has_gpu and "calc_speedup_gpu_alg" in df.columns:
+                ax.plot(df["n_vertices"], df["calc_speedup_gpu_alg"],
+                        marker="o", markersize=6.5, color="#2ca02c", linewidth=2.2,
+                        label="GPolylla")
             if dcel_time_col:
                 ax.plot(df["n_vertices"], df["calc_speedup_dcel"],
                         marker="s", markersize=5.5, color="#ff7f0e", linewidth=1.8,
@@ -215,7 +218,8 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
             x_span = x_max - x_min if x_max > x_min else x_max
             ax.set_xlim(x_min - 0.03 * x_span, x_max + 0.18 * x_span)
 
-            y_max = df["calc_speedup_gpu_alg"].max()
+            active_cols = [c for c in ["calc_speedup_gpu_alg", "calc_speedup_dcel", "calc_speedup_data", "calc_speedup_task"] if c in df.columns]
+            y_max = max([df[c].max() for c in active_cols] + [1.0])
             if log_scale:
                 ax.set_yscale("log")
                 ax.set_ylim(bottom=0.7, top=y_max * 2.8)
@@ -226,9 +230,11 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
             format_vertices_axis(ax)
             ax.tick_params(labelsize=9)
 
-        endpoints_to_annotate = [
-            {"val": df["calc_speedup_gpu_alg"].iloc[-1], "color": "#2ca02c", "text": f"{df['calc_speedup_gpu_alg'].iloc[-1]:.1f}x"}
-        ]
+        endpoints_to_annotate = []
+        if has_gpu and "calc_speedup_gpu_alg" in df.columns:
+            endpoints_to_annotate.append(
+                {"val": df["calc_speedup_gpu_alg"].iloc[-1], "color": "#2ca02c", "text": f"{df['calc_speedup_gpu_alg'].iloc[-1]:.1f}x"}
+            )
         if dcel_time_col:
             endpoints_to_annotate.append(
                 {"val": df["calc_speedup_dcel"].iloc[-1], "color": "#ff7f0e", "text": f"{df['calc_speedup_dcel'].iloc[-1]:.1f}x"}
@@ -323,14 +329,15 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
                                 df[task_time_col] + df[task_std_col],
                                 color="#9467bd", alpha=0.18)
 
-        ax.plot(df["n_vertices"], df["gpu_time_ms"],
-                marker="o", markersize=6.5, color="#2ca02c", linewidth=2.2,
-                label="GPolylla")
-        if gpu_std_col and (df[gpu_std_col] > 0).any():
-            ax.fill_between(df["n_vertices"],
-                            np.maximum(0.001, df["gpu_time_ms"] - df[gpu_std_col]),
-                            df["gpu_time_ms"] + df[gpu_std_col],
-                            color="#2ca02c", alpha=0.18)
+        if has_gpu and "gpu_time_ms" in df.columns:
+            ax.plot(df["n_vertices"], df["gpu_time_ms"],
+                    marker="o", markersize=6.5, color="#2ca02c", linewidth=2.2,
+                    label="GPolylla")
+            if gpu_std_col and (df[gpu_std_col] > 0).any():
+                ax.fill_between(df["n_vertices"],
+                                np.maximum(0.001, df["gpu_time_ms"] - df[gpu_std_col]),
+                                df["gpu_time_ms"] + df[gpu_std_col],
+                                color="#2ca02c", alpha=0.18)
 
         if log_scale:
             ax.set_yscale("log")
