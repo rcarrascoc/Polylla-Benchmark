@@ -1,35 +1,190 @@
-# PPolylla: Comparative Benchmark of Parallel Polylla Algorithms
+# Polylla: Comparative Benchmark of Parallel Polylla Algorithms
 
-Benchmark suite and performance analysis to compare five implementations of the **Polylla** algorithm:
+A high-performance benchmark suite and analysis framework for evaluating and comparing five implementations of the **Polylla** polygonal meshing algorithm:
 1. **Sequential CPU (Baseline)**: [ssalinasfe/Polylla-Mesh-DCEL](https://github.com/ssalinasfe/Polylla-Mesh-DCEL.git)
 2. **Multi-core CPU (OpenMP DCEL)**: [rcarrascoc/MPolylla-Mesh-DCEL](https://github.com/rcarrascoc/MPolylla-Mesh-DCEL.git)
 3. **Multi-core CPU (OpenMP Loops / Data)**: [rcarrascoc/MPolylla](https://github.com/rcarrascoc/MPolylla.git) (`main` branch)
 4. **Multi-core CPU (OpenMP Tasks)**: [rcarrascoc/MPolylla](https://github.com/rcarrascoc/MPolylla.git) (`Task` branch)
 5. **GPU (CUDA)**: [ssalinasfe/GPolylla](https://github.com/ssalinasfe/GPolylla.git)
 
-The system generates benchmark datasets (triangle meshes) **directly in shared memory (RAM)** to ensure that all five implementations evaluate the exact same set of vertices and faces, supporting a random seed (`seed`) for 100% reproducible experiments.
+The system generates test meshes **directly in shared memory (RAM)**, guaranteeing that all five implementations evaluate the exact same set of vertices, faces, and half-edges with zero disk I/O overhead. A pseudorandom seed (`seed`) ensures 100% reproducible experiments.
+
+---
+
+## 💻 Prerequisites & System Compatibility
+
+The benchmark suite is designed to compile and run smoothly on **any Linux machine** (x86_64, ARM64/aarch64), whether it has a dedicated NVIDIA GPU or is a CPU-only workstation, laptop, or cluster node.
+
+### System Requirements
+
+- **Operating System**: Linux (Ubuntu, Debian, Fedora, Arch, CentOS/RHEL, etc.)
+- **C++ Compiler**: GCC (`g++` >= 7.0) or Clang (`clang++` >= 8.0) supporting C++14 and OpenMP.
+- **Build System**: CMake (>= 3.18) and Make.
+- **GPU Acceleration (Optional)**: NVIDIA GPU with CUDA Toolkit (`nvcc` >= 11.0 / 12.0) and NVIDIA drivers.
+- **Python (Optional, for plotting and automated sweeps)**: Python 3.8+ with `numpy`, `pandas`, `matplotlib`.
+
+### Installing Dependencies
+
+On **Debian / Ubuntu**:
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake git python3 python3-pip
+
+# Optional: Install Python dependencies for plotting and sweeps
+pip3 install -r requirements.txt
+```
+
+On **Fedora / RHEL**:
+```bash
+sudo dnf install -y gcc-c++ cmake make git python3 python3-pip
+pip3 install -r requirements.txt
+```
+
+> [!NOTE]
+> **Universal CPU-Only Fallback**: If `nvcc` or an NVIDIA GPU is not detected, CMake automatically disables CUDA compilation (`-DENABLE_CUDA=OFF`). The project will build and run all sequential and parallel OpenMP CPU implementations seamlessly on any standard computer.
+
+---
+
+## 🛠️ How to Compile
+
+### Option 1: Automatic Build (Recommended)
+You do not need to compile manually. Executing the runner script automatically fetches submodules and compiles the benchmark binary if it has not yet been built:
+```bash
+./run_benchmark.sh --help
+```
+
+### Option 2: Manual Build (Full with CUDA GPU Support)
+```bash
+# 1. Clone repository and initialize all submodules
+git clone --recurse-submodules https://github.com/rcarrascoc/Polylla-Benchmark.git
+cd Polylla-Benchmark
+
+# (Or if already cloned, initialize submodules)
+git submodule update --init --recursive
+
+# 2. Configure and compile
+mkdir -p build && cd build
+cmake ..
+make -j$(nproc)
+cd ..
+```
+
+### Option 3: Manual Build (CPU-Only / Any Machine without GPU)
+To build exclusively for CPU (without requiring CUDA or an NVIDIA compiler):
+```bash
+git submodule update --init --recursive
+mkdir -p build && cd build
+cmake -DENABLE_CUDA=OFF ..
+make -j$(nproc)
+cd ..
+```
+
+> [!TIP]
+> **Targeting a specific CUDA Architecture**: By default, CMake targets your local GPU (`native`). To cross-compile for a specific architecture, pass `-DCMAKE_CUDA_ARCHITECTURES`:
+> ```bash
+> cmake -DCMAKE_CUDA_ARCHITECTURES=89 ..   # e.g., Ada Lovelace (RTX 40xx)
+> cmake -DCMAKE_CUDA_ARCHITECTURES=80 ..   # e.g., Ampere (A100, RTX 30xx)
+> ```
+
+---
+
+## ⚡ Quick Start
+
+### 1. Running on CPU-Only (No GPU Required)
+
+Run all four CPU implementations (**Sequential Baseline**, **OpenMP DCEL**, **OpenMP Data/Loops**, and **OpenMP Tasks**) by passing `--no-gpu`:
+
+```bash
+# Default uniform mesh of 100,000 vertices on CPU
+./run_benchmark.sh --type uniform --size 100000 --no-gpu
+
+# Run on a specific number of OpenMP CPU threads (e.g., 4 threads)
+./run_benchmark.sh --type uniform --size 100000 --no-gpu --threads 4
+
+# Run with 3 repetitions to get statistical averages and standard deviations
+./run_benchmark.sh --type uniform --size 100000 --no-gpu --runs 3
+```
+
+#### OpenMP CPU Core Scalability & Strong Scaling Benchmark
+Evaluate thread scalability and parallel efficiency across core counts (e.g., 1, 2, 4, 8, 16, 32 threads):
+```bash
+# Run scalability sweep using the dedicated runner
+./run_cores_benchmark.sh --type uniform --size 1000000 --runs 3
+
+# Or directly through the main runner:
+./run_benchmark.sh --cores-sweep --type uniform --size 1000000 --runs 3
+```
+
+---
+
+### 2. Running with GPU (CUDA)
+
+Run the complete comparison across all five variants (Sequential, OpenMP DCEL, OpenMP Data, OpenMP Tasks, and CUDA GPU):
+
+```bash
+# Complete 5-variant benchmark on 100,000 vertices (seed 42)
+./run_benchmark.sh --type uniform --size 100000 --seed 42
+
+# Structured grid mesh of 500,000 vertices
+./run_benchmark.sh --type grid --size 500000
+```
+
+#### Skip Slow Sequential Baseline for Large Meshes (`--no-seq`)
+For large meshes ($N \ge 1,000,000$), the single-threaded sequential baseline can become very slow. Use `--no-seq` to compare parallel OpenMP variants directly against CUDA GPU:
+```bash
+./run_benchmark.sh --type uniform --size 1000000 --no-seq
+```
+
+---
+
+### 3. CPU Core Affinity (P-cores / E-cores / SMT)
+
+Pin OpenMP execution to specific CPU cores or architectures on hybrid Intel/AMD CPUs:
+```bash
+# Pin execution to Performance cores (P-cores)
+./run_benchmark.sh --size 100000 --cores p-cores
+
+# Pin execution to Efficiency cores (E-cores)
+./run_benchmark.sh --size 100000 --cores e-cores
+
+# Pin to specific physical core ranges (e.g., cores 0 to 7)
+./run_benchmark.sh --size 100000 --cores 0-7 --threads 8
+```
+
+---
+
+### 4. Automated Size Sweeps and Plot Generation
+
+Sweep across multiple vertex counts to generate CSV tables and comparison plots (`plots/*.png`):
+```bash
+./run_benchmark.sh --sweep --type uniform --sizes 10000,50000,100000,500000 --seed 42
+```
+
+Outputs generated:
+- Detailed human-readable text logs in `results/*.txt`
+- Structured machine-readable metrics in `results/*.json`
+- Consolidated CSV dataset in `results/sweep_uniform_seed42.csv`
+- Speedup chart in `plots/speedup_uniform.png`
+- Execution runtime curves (log scale) in `plots/time_uniform.png`
 
 ---
 
 ## 🚀 Key Features
 
-- **Isolated Submodules**: Original repositories are integrated as Git submodules in the `submodules/` directory:
+- **Isolated Submodules**: Original repositories are integrated as Git submodules in `submodules/`:
   - `submodules/Polylla-Mesh-DCEL` (Sequential DCEL baseline)
   - `submodules/MPolylla-Mesh-DCEL` (Multi-core OpenMP DCEL)
   - `submodules/MPolylla` (Multi-core OpenMP Loops / Data - `main` branch)
   - `submodules/MPolylla-Task` (Multi-core OpenMP Tasks - `Task` branch)
   - `submodules/GPolylla` (Parallel CUDA GPU)
-  Keeping `src/` clean and decoupled through independent shared libraries (`libseq_runner.so`, `libmpolylla_dcel_runner.so`, `libmpolylla_runner.so`, `libmpolylla_task_runner.so`, `libgpolylla_runner.so`).
+  Each implementation is encapsulated inside an independent shared library (`libseq_runner.so`, `libmpolylla_dcel_runner.so`, `libmpolylla_runner.so`, `libmpolylla_task_runner.so`, `libgpolylla_runner.so`), preventing namespace collisions.
 - **In-Memory Generation (Zero Disk Overhead)**:
   - **Grid (`grid`)**: Regular structured mesh of $k \times k$ vertices with diagonal division identical to the one used in GPolylla publications.
-  - **Uniform (`uniform`)**: Uniformly distributed points in $[0, 1] \times [0, 1]$ with boundary snapping (`move_point`) and in-memory Delaunay triangulation completed in milliseconds thanks to `delaunator-cpp`.
+  - **Uniform (`uniform`)**: Uniformly distributed points in $[0, 1] \times [0, 1]$ with boundary snapping (`move_point`) and in-memory Delaunay triangulation completed in milliseconds via `delaunator-cpp`.
 - **Exact Reproducibility & Statistical Rigor**:
-  - `--seed` parameter to accurately replicate uniform distributions.
-  - `--seeds <S1,S2,...>` to evaluate across multiple distributions in a single run.
+  - `--seed <N>` to reproduce exact random distributions.
+  - `--seeds <S1,S2,...>` to evaluate multiple seeds in a single experiment.
   - `--runs <N>` repetitions to report mean execution times and standard deviations ($\pm \sigma$).
-- **CPU Core Affinity & Scaling**:
-  - `-c, --cores <SPEC>`: Pin OpenMP threads to specific cores, core ranges (e.g., `0-7`), or hybrid architectures (`p-cores` / `e-cores`).
-  - Strong scaling benchmark mode (`--cores-sweep` / `--scaling`) to measure speedup and parallel efficiency across thread counts.
 - **Comprehensive Timer Breakdown**:
   1. Triangulation data structure construction (`time_triangulation_generation`)
   2. Label maximum edges (`d_time_to_label_max_edges`)
@@ -47,10 +202,9 @@ The system generates benchmark datasets (triangle meshes) **directly in shared m
     - OpenMP DCEL vs Sequential Baseline
     - OpenMP Data (Loops) vs Sequential Baseline
     - OpenMP Tasks vs Sequential Baseline
-    - OpenMP relative speedups (Tasks vs Data, Tasks vs DCEL, Data vs DCEL)
+    - OpenMP relative comparisons (Tasks vs Data, Tasks vs DCEL, Data vs DCEL)
     - GPU vs OpenMP variants (DCEL, Data, Tasks)
 - **Automatic Export to `.txt`, `.json`, and `.csv`**: Generates a human-readable report with exhaustive hardware metadata (CPU, GPU, RAM, OS, CUDA), exact commit hashes of each submodule, and run parameters.
-- **Single-Command Execution**: `./run_benchmark.sh` script, CLI `scripts/benchmark.py`, and scalability analyzer `scripts/benchmark_cores.py` supporting automated sweeps and Matplotlib plot generation.
 
 ---
 
@@ -58,8 +212,10 @@ The system generates benchmark datasets (triangle meshes) **directly in shared m
 
 ```
 PPolylla/
-├── CMakeLists.txt              # CMake build configuration (C++14, CUDA sm_89/native, OpenMP)
-├── run_benchmark.sh            # Main benchmark runner script
+├── CMakeLists.txt              # CMake build configuration (C++14, CUDA, OpenMP)
+├── run_benchmark.sh            # Main benchmark runner script (compiles & runs)
+├── run_cores_benchmark.sh      # OpenMP CPU core scaling & thread efficiency script
+├── requirements.txt            # Python dependencies (numpy, pandas, matplotlib)
 ├── README.md                   # Project documentation
 ├── submodules/                 # External submodules (remote repositories)
 │   ├── Polylla-Mesh-DCEL/      # Sequential CPU baseline
@@ -82,58 +238,11 @@ PPolylla/
 │   │   └── gpu_runner.hpp / .cu          # GPolylla wrapper in libgpolylla_runner.so
 │   └── main.cpp                # Main C++ benchmark executable
 ├── scripts/
-│   ├── benchmark.py            # Python orchestrator for size sweeps and plotting
+│   ├── benchmark.py            # Python orchestrator for sweeps and plotting
 │   └── benchmark_cores.py      # Python orchestrator for OpenMP core scaling and efficiency
 ├── results/                    # Benchmark results in TXT, JSON, and CSV
-└── plots/                      # Generated plots (PNG)
+└── plots/                      # Generated plots (PNG and PDF)
 ```
-
----
-
-## 🖥️ Quick Start (Single Command)
-
-### 1. Full Single Benchmark (Sequential vs OpenMP DCEL vs OpenMP Data vs OpenMP Tasks vs GPU)
-
-```bash
-# Uniform mesh with 100,000 vertices and seed 42
-./run_benchmark.sh --type uniform --size 100000 --seed 42
-
-# 3 repetitions to report average execution times and standard deviations
-./run_benchmark.sh --type uniform --size 100000 --runs 3
-
-# Grid mesh with 1,000,000 vertices (skipping sequential baseline to speed up execution)
-./run_benchmark.sh --type grid --size 1000000 --no-seq
-
-# Run only the CPU variants (skip GPU)
-./run_benchmark.sh --type uniform --size 100000 --no-gpu
-```
-
-### 2. CPU Core Affinity and Scalability Analysis
-
-```bash
-# Pin execution to Performance cores (P-cores)
-./run_benchmark.sh --size 100000 --cores p-cores
-
-# Pin execution to 4 threads on specific CPU cores (0 to 3)
-./run_benchmark.sh --size 100000 --cores 0-3 --threads 4
-
-# Run OpenMP strong scaling sweep across core counts (1, 2, 4, 8, 16, 32...)
-./run_benchmark.sh --cores-sweep --type uniform --size 1000000 --runs 3
-```
-
-### 3. Automated Size Sweep and Plotting
-
-To evaluate multiple mesh sizes (e.g., 10k, 50k, 100k vertices):
-
-```bash
-./run_benchmark.sh --sweep --type uniform --sizes 10000,50000,100000 --seed 42
-```
-
-Generated output:
-- Human-readable individual reports in `results/*.txt` and structured in `results/*.json`
-- Consolidated CSV table in `results/sweep_uniform_seed42.csv`
-- Speedup plot in `plots/speedup_uniform.png`
-- Runtime plot in `plots/time_uniform.png` (log-scale curves)
 
 ---
 
@@ -198,19 +307,19 @@ Generated output:
 
 | Option | Description | Default |
 | :--- | :--- | :--- |
-| `-t, --type <grid\|uniform>` | Mesh type to generate in memory | `uniform` |
-| `-s, --size <N>` | Number of requested vertices | `100000` |
-| `-r, --seed <SEED>` | Pseudorandom generator seed | `42` |
-| `--seeds <S1,S2,...>` | Comma-separated list of random seeds for multi-seed runs | None |
-| `--runs, --repeat <N>` | Number of repetitions per experiment to compute average times and std dev | `1` |
-| `-j, --threads <T>` | OpenMP threads for CPU (0 = all detected cores or core count) | `0` |
-| `-c, --cores <SPEC>` | CPU core affinity (e.g., `0-7`, `8-19`, `p-cores`, `e-cores`) | `all` |
-| `-o, --output <PATH>` | Output JSON file path | `results/benchmark_...json` |
-| `-f, --off <FILE>` | Use an existing `.off` file instead of generating in memory | None |
+| `-t, --type <grid\|uniform>` | Mesh distribution type to generate in memory | `uniform` |
+| `-s, --size <N>` | Target number of vertices to generate | `100000` |
+| `-r, --seed <SEED>` | Pseudorandom generator seed for a single run | `42` |
+| `--seeds <S1,S2,...>` | Comma-separated list of random seeds for multi-seed evaluation | None |
+| `--runs, --repeat <N>` | Number of repetitions per experiment (computes average and $\pm \sigma$) | `1` |
+| `-j, --threads <T>` | OpenMP threads count (0 = all detected CPU cores) | `0` |
+| `-c, --cores <SPEC>` | OpenMP core affinity (`all`, `p-cores`, `e-cores`, range e.g. `0-7`) | `all` |
+| `-o, --output <PATH>` | Custom output path for comparison JSON report | `results/benchmark_...json` |
+| `-f, --off <FILE>` | Use an existing `.off` file instead of in-memory generation | None |
 | `--no-seq` | Skip the sequential CPU baseline (`Polylla-Mesh-DCEL`) | `false` |
-| `--no-gpu` | Skip the CUDA GPU variant (`GPolylla`), executing CPU variants only | `false` |
+| `--no-gpu` | Skip the CUDA GPU benchmark (`GPolylla`), executing CPU variants only | `false` |
 | `--save-mesh <PATH>` | Save generated mesh to a persistent `.off` file | None |
-| `--sweep` | Enable multi-size sweep mode via Python script | `false` |
-| `--sizes <N1,N2,...>` | Comma-separated list of sizes for the sweep | `10k,50k,100k,500k,1M` |
+| `--sweep` | Enable multi-size sweep mode via Python orchestrator | `false` |
+| `--sizes <N1,N2,...>` | Comma-separated list of vertex sizes for the sweep | `10k,50k,100k,500k,1M` |
 | `--cores-sweep, --scaling` | Run OpenMP thread and core scalability benchmark | `false` |
-| `-h, --help` | Display help menu | - |
+| `-h, --help` | Display command-line help menu | - |
