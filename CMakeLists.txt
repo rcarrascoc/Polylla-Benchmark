@@ -5,6 +5,18 @@ project(PPolylla LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Default to Release build type for all targets to enable full optimizations
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
+endif()
+
+# Global optimization flags for C/C++ (-O3, -march=native) and CUDA (-O3)
+add_compile_options(
+    "$<$<COMPILE_LANGUAGE:C>:-O3;-march=native>"
+    "$<$<COMPILE_LANGUAGE:CXX>:-O3;-march=native>"
+    "$<$<COMPILE_LANGUAGE:CUDA>:-O3>"
+)
+
 option(ENABLE_CUDA "Enable CUDA GPU runner (GPolylla)" ON)
 
 # Find OpenMP
@@ -23,19 +35,9 @@ if(ENABLE_CUDA)
         set(CMAKE_CUDA_STANDARD 14)
         set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-        # Detect or configure CUDA architecture
-        if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-            execute_process(
-                COMMAND nvidia-smi -L
-                RESULT_VARIABLE NVIDIA_SMI_RES
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            if(NVIDIA_SMI_RES EQUAL 0)
-                set(CMAKE_CUDA_ARCHITECTURES "native")
-            else()
-                # Fallback to sm_89 (Ada Lovelace) or sm_80 if no live GPU detected
-                set(CMAKE_CUDA_ARCHITECTURES 89)
-            endif()
+        # Detect or configure CUDA architecture (default to sm_89 for RTX 4090 / Ada Lovelace or user specified)
+        if(NOT CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES EQUAL 52)
+            set(CMAKE_CUDA_ARCHITECTURES 89 CACHE STRING "CUDA Architectures" FORCE)
         endif()
         message(STATUS "CUDA enabled. Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
         add_compile_definitions(ENABLE_CUDA)

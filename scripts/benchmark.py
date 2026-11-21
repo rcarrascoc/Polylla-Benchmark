@@ -42,7 +42,7 @@ def ensure_built():
 
         cuda_arch = os.environ.get("CUDA_ARCH", "native")
         print(f"[Build] {BINARY} not found. Running CMake (CUDA_ARCH={cuda_arch}) and Make...")
-        cmd_cmake = ["cmake", f"-DCMAKE_CUDA_ARCHITECTURES={cuda_arch}", ".."]
+        cmd_cmake = ["cmake", "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_CUDA_ARCHITECTURES={cuda_arch}", ".."]
         if os.environ.get("NO_CUDA") == "1" or "--no-gpu" in sys.argv:
             cmd_cmake.append("-DENABLE_CUDA=OFF")
         subprocess.check_call(cmd_cmake, cwd=BUILD_DIR)

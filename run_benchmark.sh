@@ -29,7 +29,7 @@ if [ ! -f "${BINARY}" ]; then
         EXTRA_CMAKE_ARGS+=("-DENABLE_CUDA=OFF")
     fi
     CUDA_ARCH="${CUDA_ARCH:-native}"
-    cmake -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" "${EXTRA_CMAKE_ARGS[@]}" ..
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" "${EXTRA_CMAKE_ARGS[@]}" ..
     make -j$(nproc)
     cd "${SCRIPT_DIR}"
     echo "[PPolylla] Build successful!"
