@@ -36,6 +36,7 @@ void print_help(const char* prog_name) {
               << "  -f, --off <FILE>             Run benchmark on an existing .off file\n"
               << "  --no-seq                     Skip sequential CPU baseline (useful for very large meshes)\n"
               << "  --no-gpu                     Skip CUDA GPU benchmark\n"
+              << "  --gpu-only, --only-gpu       Run only CUDA GPU benchmark (skips all CPU implementations)\n"
               << "  --save-mesh <FILE>           Save the generated mesh to a persistent .off file\n"
               << "  -h, --help                   Show this help message\n\n"
               << "Robust Benchmark Examples:\n"
@@ -59,6 +60,7 @@ BenchmarkComparison run_benchmark_instance(
     const std::string& input_off,
     const std::string& save_mesh_path,
     bool run_sequential,
+    bool run_cpu,
     bool run_gpu,
     int cpu_threads,
     const std::string& affinity_desc,
@@ -153,105 +155,114 @@ BenchmarkComparison run_benchmark_instance(
         comp.has_seq = false;
     }
 
-    // 2. OpenMP CPU (DCEL - rcarrascoc/MPolylla-Mesh-DCEL)
-    std::cout << "\n------------------------------------------------------------------------\n"
+    // 2-4. OpenMP CPU Benchmarks
+    if (run_cpu) {
+        // 2. OpenMP CPU (DCEL - rcarrascoc/MPolylla-Mesh-DCEL)
+        std::cout << "\n------------------------------------------------------------------------\n"
                   << "  [2/5] RUNNING CPU MULTI-CORE DCEL (rcarrascoc/MPolylla-Mesh-DCEL"
                   << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
                   << "------------------------------------------------------------------------\n";
-    std::vector<PolyllaStats> dcel_runs;
-    {
-        ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
-        for (int r = 0; r < num_runs; ++r) {
-            std::string tmp_dcel_json = "/dev/shm/dcel_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
-            PolyllaStats s;
-            bool ok = run_mpolylla_dcel_from_memory(&mesh, tmp_dcel_json.c_str(), comp.cpu_threads, &s);
-            std::remove(tmp_dcel_json.c_str());
-            if (ok) {
-                if (num_runs > 1) {
-                    std::cout << "    Run " << (r + 1) << "/" << num_runs << ": " 
-                              << std::fixed << std::setprecision(3) << s.d_time_to_generate_polygonal_mesh << " ms\n";
+        std::vector<PolyllaStats> dcel_runs;
+        {
+            ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
+            for (int r = 0; r < num_runs; ++r) {
+                std::string tmp_dcel_json = "/dev/shm/dcel_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
+                PolyllaStats s;
+                bool ok = run_mpolylla_dcel_from_memory(&mesh, tmp_dcel_json.c_str(), comp.cpu_threads, &s);
+                std::remove(tmp_dcel_json.c_str());
+                if (ok) {
+                    if (num_runs > 1) {
+                        std::cout << "    Run " << (r + 1) << "/" << num_runs << ": " 
+                                  << std::fixed << std::setprecision(3) << s.d_time_to_generate_polygonal_mesh << " ms\n";
+                    }
+                    dcel_runs.push_back(s);
+                } else {
+                    std::cerr << "Warning: CPU DCEL benchmark run " << (r + 1) << " failed! Message: " << s.error_message << std::endl;
                 }
-                dcel_runs.push_back(s);
-            } else {
-                std::cerr << "Warning: CPU DCEL benchmark run " << (r + 1) << " failed! Message: " << s.error_message << std::endl;
             }
         }
-    }
-    comp.has_dcel = !dcel_runs.empty();
-    if (comp.has_dcel) {
-        comp.dcel_stats.aggregate_runs(dcel_runs);
-        if (num_runs > 1) {
-            std::cout << "    --> MPolylla DCEL Mean: " << std::fixed << std::setprecision(3) 
-                      << comp.dcel_stats.d_time_to_generate_polygonal_mesh << " ± " 
-                      << comp.dcel_stats.time_total_algorithm_std << " ms\n";
+        comp.has_dcel = !dcel_runs.empty();
+        if (comp.has_dcel) {
+            comp.dcel_stats.aggregate_runs(dcel_runs);
+            if (num_runs > 1) {
+                std::cout << "    --> MPolylla DCEL Mean: " << std::fixed << std::setprecision(3) 
+                          << comp.dcel_stats.d_time_to_generate_polygonal_mesh << " ± " 
+                          << comp.dcel_stats.time_total_algorithm_std << " ms\n";
+            }
         }
-    }
 
-    // 3. OpenMP CPU (Data - main branch)
-    std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [3/5] RUNNING CPU MULTI-CORE DATA (rcarrascoc/MPolylla - main"
-              << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
-              << "------------------------------------------------------------------------\n";
-    std::vector<PolyllaStats> cpu_runs;
-    {
-        ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
-        for (int r = 0; r < num_runs; ++r) {
-            std::string tmp_cpu_json = "/dev/shm/cpu_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
-            PolyllaStats s;
-            bool ok = run_mpolylla_from_memory(&mesh, tmp_cpu_json.c_str(), comp.cpu_threads, &s);
-            std::remove(tmp_cpu_json.c_str());
-            if (ok) {
-                if (num_runs > 1) {
-                    std::cout << "    Run " << (r + 1) << "/" << num_runs << ": " 
-                              << std::fixed << std::setprecision(3) << s.d_time_to_generate_polygonal_mesh << " ms\n";
+        // 3. OpenMP CPU (Data - main branch)
+        std::cout << "\n------------------------------------------------------------------------\n"
+                  << "  [3/5] RUNNING CPU MULTI-CORE DATA (rcarrascoc/MPolylla - main"
+                  << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
+                  << "------------------------------------------------------------------------\n";
+        std::vector<PolyllaStats> cpu_runs;
+        {
+            ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
+            for (int r = 0; r < num_runs; ++r) {
+                std::string tmp_cpu_json = "/dev/shm/cpu_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
+                PolyllaStats s;
+                bool ok = run_mpolylla_from_memory(&mesh, tmp_cpu_json.c_str(), comp.cpu_threads, &s);
+                std::remove(tmp_cpu_json.c_str());
+                if (ok) {
+                    if (num_runs > 1) {
+                        std::cout << "    Run " << (r + 1) << "/" << num_runs << ": " 
+                                  << std::fixed << std::setprecision(3) << s.d_time_to_generate_polygonal_mesh << " ms\n";
+                    }
+                    cpu_runs.push_back(s);
+                } else {
+                    std::cerr << "Warning: CPU Data benchmark run " << (r + 1) << " failed! Message: " << s.error_message << std::endl;
                 }
-                cpu_runs.push_back(s);
-            } else {
-                std::cerr << "Warning: CPU Data benchmark run " << (r + 1) << " failed! Message: " << s.error_message << std::endl;
             }
         }
-    }
-    if (!cpu_runs.empty()) {
-        comp.cpu_stats.aggregate_runs(cpu_runs);
-        if (num_runs > 1) {
-            std::cout << "    --> MPolylla Data Mean: " << std::fixed << std::setprecision(3) 
-                      << comp.cpu_stats.d_time_to_generate_polygonal_mesh << " ± " 
-                      << comp.cpu_stats.time_total_algorithm_std << " ms\n";
+        comp.has_omp = !cpu_runs.empty();
+        if (comp.has_omp) {
+            comp.cpu_stats.aggregate_runs(cpu_runs);
+            if (num_runs > 1) {
+                std::cout << "    --> MPolylla Data Mean: " << std::fixed << std::setprecision(3) 
+                          << comp.cpu_stats.d_time_to_generate_polygonal_mesh << " ± " 
+                          << comp.cpu_stats.time_total_algorithm_std << " ms\n";
+            }
         }
-    }
 
-    // 4. OpenMP CPU (Tasks - Task branch)
-    std::cout << "\n------------------------------------------------------------------------\n"
-              << "  [4/5] RUNNING CPU MULTI-CORE TASKS (rcarrascoc/MPolylla - Task"
-              << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
-              << "------------------------------------------------------------------------\n";
-    std::vector<PolyllaStats> task_runs;
-    {
-        ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
-        for (int r = 0; r < num_runs; ++r) {
-            std::string tmp_task_json = "/dev/shm/task_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
-            PolyllaStats s;
-            bool ok = run_mpolylla_task_from_memory(&mesh, tmp_task_json.c_str(), comp.cpu_threads, &s);
-            std::remove(tmp_task_json.c_str());
-            if (ok) {
-                if (num_runs > 1) {
-                    std::cout << "    Run " << (r + 1) << "/" << num_runs << ": " 
-                              << std::fixed << std::setprecision(3) << s.d_time_to_generate_polygonal_mesh << " ms\n";
+        // 4. OpenMP CPU (Tasks - Task branch)
+        std::cout << "\n------------------------------------------------------------------------\n"
+                  << "  [4/5] RUNNING CPU MULTI-CORE TASKS (rcarrascoc/MPolylla - Task"
+                  << (num_runs > 1 ? (", " + std::to_string(num_runs) + " runs") : "") << ")\n"
+                  << "------------------------------------------------------------------------\n";
+        std::vector<PolyllaStats> task_runs;
+        {
+            ScopedCpuAffinity affinity_guard(affinity_cores, comp.cpu_threads);
+            for (int r = 0; r < num_runs; ++r) {
+                std::string tmp_task_json = "/dev/shm/task_stats_" + std::to_string(getpid()) + "_" + std::to_string(r) + ".json";
+                PolyllaStats s;
+                bool ok = run_mpolylla_task_from_memory(&mesh, tmp_task_json.c_str(), comp.cpu_threads, &s);
+                std::remove(tmp_task_json.c_str());
+                if (ok) {
+                    if (num_runs > 1) {
+                        std::cout << "    Run " << (r + 1) << "/" << num_runs << ": " 
+                                  << std::fixed << std::setprecision(3) << s.d_time_to_generate_polygonal_mesh << " ms\n";
+                    }
+                    task_runs.push_back(s);
+                } else {
+                    std::cerr << "Warning: CPU Tasks benchmark run " << (r + 1) << " failed! Message: " << s.error_message << std::endl;
                 }
-                task_runs.push_back(s);
-            } else {
-                std::cerr << "Warning: CPU Tasks benchmark run " << (r + 1) << " failed! Message: " << s.error_message << std::endl;
             }
         }
-    }
-    comp.has_task = !task_runs.empty();
-    if (comp.has_task) {
-        comp.task_stats.aggregate_runs(task_runs);
-        if (num_runs > 1) {
-            std::cout << "    --> MPolylla Task Mean: " << std::fixed << std::setprecision(3) 
-                      << comp.task_stats.d_time_to_generate_polygonal_mesh << " ± " 
-                      << comp.task_stats.time_total_algorithm_std << " ms\n";
+        comp.has_task = !task_runs.empty();
+        if (comp.has_task) {
+            comp.task_stats.aggregate_runs(task_runs);
+            if (num_runs > 1) {
+                std::cout << "    --> MPolylla Task Mean: " << std::fixed << std::setprecision(3) 
+                          << comp.task_stats.d_time_to_generate_polygonal_mesh << " ± " 
+                          << comp.task_stats.time_total_algorithm_std << " ms\n";
+            }
         }
+    } else {
+        std::cout << "\n[Info] Skipping OpenMP CPU benchmarks (--gpu-only requested)\n";
+        comp.has_dcel = false;
+        comp.has_omp = false;
+        comp.has_task = false;
     }
 
     // 5. GPU CUDA
@@ -311,6 +322,7 @@ int main(int argc, char* argv[]) {
     std::string input_off = "";
     std::string save_mesh_path = "";
     bool run_sequential = true;
+    bool run_cpu = true;
 #ifdef ENABLE_CUDA
     bool run_gpu = true;
 #else
@@ -330,6 +342,9 @@ int main(int argc, char* argv[]) {
         {"off",       required_argument, 0, 'f'},
         {"no-seq",    no_argument,       0, 1002},
         {"no-gpu",    no_argument,       0, 1005},
+        {"gpu-only",  no_argument,       0, 1006},
+        {"only-gpu",  no_argument,       0, 1006},
+        {"no-cpu",    no_argument,       0, 1006},
         {"save-mesh", required_argument, 0, 1001},
         {"help",      no_argument,       0, 'h'},
         {0, 0, 0, 0}
@@ -363,6 +378,11 @@ int main(int argc, char* argv[]) {
             case 1001: save_mesh_path = optarg; break;
             case 1002: run_sequential = false; break;
             case 1005: run_gpu = false; break;
+            case 1006:
+                run_sequential = false;
+                run_cpu = false;
+                run_gpu = true;
+                break;
             case 'h':
             default:
                 print_help(argv[0]);
@@ -411,7 +431,7 @@ int main(int argc, char* argv[]) {
         uint64_t current_seed = seeds_list[0];
         BenchmarkComparison comp = run_benchmark_instance(
             mesh_type, requested_size, current_seed, num_runs, input_off, save_mesh_path,
-            run_sequential, run_gpu, cpu_threads, affinity_desc, affinity_cores, meta);
+            run_sequential, run_cpu, run_gpu, cpu_threads, affinity_desc, affinity_cores, meta);
 
         comp.print_table(std::cout);
 
@@ -434,7 +454,9 @@ int main(int argc, char* argv[]) {
         comp.save_json(json_file);
         comp.save_txt(txt_file);
 
-        return (comp.cpu_stats.success && (!run_gpu || comp.gpu_stats.success)) ? 0 : 1;
+        bool cpu_ok = !run_cpu || comp.cpu_stats.success;
+        bool gpu_ok = !run_gpu || comp.gpu_stats.success;
+        return (cpu_ok && gpu_ok) ? 0 : 1;
     } else {
         // Multi-seed execution
         MultiSeedSummary summary;
@@ -447,7 +469,7 @@ int main(int argc, char* argv[]) {
             std::cout << "\n>>> [Seed " << (i + 1) << "/" << seeds_list.size() << ": " << current_seed << "] <<<\n";
             BenchmarkComparison comp = run_benchmark_instance(
                 mesh_type, requested_size, current_seed, num_runs, input_off, save_mesh_path,
-                run_sequential, run_gpu, cpu_threads, affinity_desc, affinity_cores, meta);
+                run_sequential, run_cpu, run_gpu, cpu_threads, affinity_desc, affinity_cores, meta);
 
             std::string safe_type = (mesh_type == "grid" || mesh_type == "uniform") ? mesh_type : "custom";
             std::string seed_base = "results/benchmark_" + safe_type + "_" + std::to_string(requested_size) + "_seed" + std::to_string(current_seed);

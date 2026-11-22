@@ -50,7 +50,7 @@ def ensure_built():
         subprocess.check_call(cmd_make, cwd=BUILD_DIR)
         print("[Build] Build completed successfully.\n")
 
-def run_single(mesh_type: str, size: int, seed: int, runs: int = 1, threads: int = 0, cores: str = "", no_seq: bool = False, no_gpu: bool = False, output_json: str = None):
+def run_single(mesh_type: str, size: int, seed: int, runs: int = 1, threads: int = 0, cores: str = "", no_seq: bool = False, no_gpu: bool = False, gpu_only: bool = False, output_json: str = None):
     """Executes a single benchmark run with optional repetitions."""
     ensure_built()
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -72,10 +72,13 @@ def run_single(mesh_type: str, size: int, seed: int, runs: int = 1, threads: int
         cmd.extend(["--threads", str(threads)])
     if cores:
         cmd.extend(["--cores", str(cores)])
-    if no_seq:
-        cmd.append("--no-seq")
-    if no_gpu:
-        cmd.append("--no-gpu")
+    if gpu_only:
+        cmd.append("--gpu-only")
+    else:
+        if no_seq:
+            cmd.append("--no-seq")
+        if no_gpu:
+            cmd.append("--no-gpu")
 
     print(f"\n[Run] Executing: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT)
@@ -92,7 +95,7 @@ def run_single(mesh_type: str, size: int, seed: int, runs: int = 1, threads: int
             return json.load(f)
     return None
 
-def run_sweep(mesh_type: str, sizes: list, seeds: list, runs: int = 1, threads: int = 0, cores: str = "", no_seq: bool = False, no_gpu: bool = False, plot: bool = True):
+def run_sweep(mesh_type: str, sizes: list, seeds: list, runs: int = 1, threads: int = 0, cores: str = "", no_seq: bool = False, no_gpu: bool = False, gpu_only: bool = False, plot: bool = True):
     """Executes a sweep over multiple mesh sizes and seeds, and optionally plots results."""
     ensure_built()
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -102,10 +105,11 @@ def run_sweep(mesh_type: str, sizes: list, seeds: list, runs: int = 1, threads: 
     for sz in sizes:
         for sd in seeds:
             print(f"\n>>> Running sweep point: type={mesh_type}, size={sz}, seed={sd}, runs={runs} <<<")
-            data = run_single(mesh_type, sz, sd, runs=runs, threads=threads, cores=cores, no_seq=no_seq, no_gpu=no_gpu)
+            data = run_single(mesh_type, sz, sd, runs=runs, threads=threads, cores=cores, no_seq=no_seq, no_gpu=no_gpu, gpu_only=gpu_only)
             if data:
                 has_seq = data.get("has_sequential_baseline", False)
                 has_dcel = data.get("has_omp_dcel", False)
+                has_omp = data.get("has_omp_data", False)
                 has_task = data.get("has_omp_task", False)
                 has_gpu = data.get("has_gpu", False)
                 seq_dict = data.get("sequential", {})
@@ -120,8 +124,8 @@ def run_sweep(mesh_type: str, sizes: list, seeds: list, runs: int = 1, threads: 
                 omp_dcel_time = dcel_dict.get("time_total_algorithm", 0.0) if has_dcel else None
                 omp_dcel_std = dcel_dict.get("time_total_algorithm_std", 0.0) if has_dcel else 0.0
 
-                omp_data_time = data_dict.get("time_total_algorithm", 0.0)
-                omp_data_std = data_dict.get("time_total_algorithm_std", 0.0)
+                omp_data_time = data_dict.get("time_total_algorithm", 0.0) if has_omp else None
+                omp_data_std = data_dict.get("time_total_algorithm_std", 0.0) if has_omp else 0.0
 
                 omp_task_time = tasks_dict.get("time_total_algorithm", 0.0) if has_task else None
                 omp_task_std = tasks_dict.get("time_total_algorithm_std", 0.0) if has_task else 0.0
@@ -302,7 +306,7 @@ def run_sweep(mesh_type: str, sizes: list, seeds: list, runs: int = 1, threads: 
         else:
             seq_str = f"{row['seq_time_ms']:>11.3f}" if (row.get('seq_time_ms') is not None and not pd.isna(row['seq_time_ms'])) else f"{'-':>11}"
             dcel_str = f"{row['omp_dcel_time_ms']:>11.3f}" if (row.get('omp_dcel_time_ms') is not None and not pd.isna(row['omp_dcel_time_ms'])) else f"{'-':>11}"
-            data_str = f"{row['omp_data_time_ms']:>11.3f}"
+            data_str = f"{row['omp_data_time_ms']:>11.3f}" if (row.get('omp_data_time_ms') is not None and not pd.isna(row['omp_data_time_ms'])) else f"{'-':>11}"
             task_str = f"{row['omp_tasks_time_ms']:>11.3f}" if (row.get('omp_tasks_time_ms') is not None and not pd.isna(row['omp_tasks_time_ms'])) else f"{'-':>11}"
             gpu_str = f"{row['gpu_time_ms']:>11.3f}" if (row.get('gpu_time_ms') is not None and not pd.isna(row['gpu_time_ms']) and row['gpu_time_ms'] > 0) else f"{'-':>11}"
             gpu_cp_str = f"{row['gpu_total_with_copies_ms']:>11.3f}" if (row.get('gpu_total_with_copies_ms') is not None and not pd.isna(row['gpu_total_with_copies_ms']) and row['gpu_total_with_copies_ms'] > 0) else f"{'-':>11}"
@@ -340,6 +344,7 @@ def main():
     parser.add_argument("-o", "--output", type=str, default=None, help="Output JSON path")
     parser.add_argument("--no-seq", action="store_true", help="Skip sequential CPU baseline")
     parser.add_argument("--no-gpu", action="store_true", help="Skip CUDA GPU benchmark")
+    parser.add_argument("--gpu-only", "--only-gpu", action="store_true", dest="gpu_only", help="Run only CUDA GPU benchmark (skip all CPU implementations)")
     parser.add_argument("--sweep", action="store_true", help="Run sweep over multiple sizes")
     parser.add_argument("--sizes", type=str, default="10000,50000,100000,500000,1000000", help="Comma-separated sizes for sweep")
     parser.add_argument("--no-plot", action="store_true", help="Disable plot generation")
@@ -364,10 +369,10 @@ def main():
 
     if args.sweep:
         sizes = [int(x.strip()) for x in args.sizes.split(",")]
-        run_sweep(args.type, sizes, seeds, runs=args.runs, threads=args.threads, cores=args.cores, no_seq=args.no_seq, no_gpu=args.no_gpu, plot=not args.no_plot)
+        run_sweep(args.type, sizes, seeds, runs=args.runs, threads=args.threads, cores=args.cores, no_seq=args.no_seq, no_gpu=args.no_gpu, gpu_only=args.gpu_only, plot=not args.no_plot)
     else:
         if len(seeds) == 1:
-            run_single(args.type, args.size, seeds[0], runs=args.runs, threads=args.threads, cores=args.cores, no_seq=args.no_seq, no_gpu=args.no_gpu, output_json=args.output)
+            run_single(args.type, args.size, seeds[0], runs=args.runs, threads=args.threads, cores=args.cores, no_seq=args.no_seq, no_gpu=args.no_gpu, gpu_only=args.gpu_only, output_json=args.output)
         else:
             cmd = [
                 str(BINARY),
@@ -379,11 +384,14 @@ def main():
             if args.threads > 0:
                 cmd.extend(["--threads", str(args.threads)])
             if args.cores:
-                cmd.extend(["--cores", str(args.cores)])
-            if args.no_seq:
-                cmd.append("--no-seq")
-            if args.no_gpu:
-                cmd.append("--no-gpu")
+                cmd.extend(["--cores", str(cores)])
+            if args.gpu_only:
+                cmd.append("--gpu-only")
+            else:
+                if args.no_seq:
+                    cmd.append("--no-seq")
+                if args.no_gpu:
+                    cmd.append("--no-gpu")
             if args.output:
                 cmd.extend(["--output", str(args.output)])
             print(f"\n[Run Multi-Seed] Executing: {' '.join(cmd)}")

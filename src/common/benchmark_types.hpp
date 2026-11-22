@@ -313,6 +313,7 @@ struct BenchmarkComparison {
     PolyllaStats seq_stats;
     bool has_dcel = false;
     PolyllaStats dcel_stats;      // OpenMP DCEL (rcarrascoc/MPolylla-Mesh-DCEL)
+    bool has_omp = false;
     PolyllaStats cpu_stats;       // OpenMP Data (branch main)
     bool has_task = false;
     PolyllaStats task_stats;      // OpenMP Tasks (branch Task)
@@ -401,16 +402,18 @@ struct BenchmarkComparison {
         auto print_elem = [&](const char* name, long long seq, long long dcel, long long omp, long long task, long long gpu) {
             bool all_parallel_match;
             if (has_gpu) {
-                all_parallel_match = (omp == gpu && (!has_task || task == gpu) && (!has_dcel || dcel == gpu));
-            } else {
+                all_parallel_match = ((!has_omp || omp == gpu) && (!has_task || task == gpu) && (!has_dcel || dcel == gpu));
+            } else if (has_omp) {
                 all_parallel_match = ((!has_task || task == omp) && (!has_dcel || dcel == omp));
+            } else {
+                all_parallel_match = true;
             }
             std::string status = all_parallel_match ? "MATCH (All Parallel)" : "DIFF (Parallel)";
-            if (has_seq && (seq != omp || (has_task && seq != task) || (has_dcel && seq != dcel))) status += "*";
+            if (has_seq && ((has_omp && seq != omp) || (has_task && seq != task) || (has_dcel && seq != dcel))) status += "*";
             os << "  " << std::left << std::setw(25) << name
                << "  " << std::right << std::setw(17) << (has_seq ? std::to_string(seq) : "-")
                << "  " << std::right << std::setw(15) << (has_dcel ? std::to_string(dcel) : "-")
-               << "  " << std::right << std::setw(15) << omp
+               << "  " << std::right << std::setw(15) << (has_omp ? std::to_string(omp) : "-")
                << "  " << std::right << std::setw(15) << (has_task ? std::to_string(task) : "-")
                << "  " << std::right << std::setw(14) << (has_gpu ? std::to_string(gpu) : "-")
                << "  " << std::right << std::setw(23) << status
@@ -435,12 +438,18 @@ struct BenchmarkComparison {
 
         auto print_timer = [&](const char* name, double seq_t, double dcel_t, double omp_t, double task_t, double gpu_t) {
             double sp_ref = has_gpu ? ((has_seq && gpu_t > 0.0) ? (seq_t / gpu_t) : 0.0)
-                                    : ((has_seq && omp_t > 0.0) ? (seq_t / omp_t) : 0.0);
+                                    : ((has_seq && has_omp && omp_t > 0.0) ? (seq_t / omp_t) : 0.0);
+            auto fmt_t = [](double t, bool valid) -> std::string {
+                if (!valid) return "-";
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(4) << t;
+                return ss.str();
+            };
             os << "  " << std::left << std::setw(25) << name
-               << "  " << std::right << std::setw(17) << std::fixed << std::setprecision(4) << (has_seq ? seq_t : 0.0)
-               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << (has_dcel ? dcel_t : 0.0)
-               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << omp_t
-               << "  " << std::right << std::setw(15) << std::fixed << std::setprecision(4) << (has_task ? task_t : 0.0);
+               << "  " << std::right << std::setw(17) << fmt_t(seq_t, has_seq)
+               << "  " << std::right << std::setw(15) << fmt_t(dcel_t, has_dcel)
+               << "  " << std::right << std::setw(15) << fmt_t(omp_t, has_omp)
+               << "  " << std::right << std::setw(15) << fmt_t(task_t, has_task);
             if (has_gpu) {
                 os << "  " << std::right << std::setw(14) << std::fixed << std::setprecision(4) << gpu_t;
             } else {
@@ -477,7 +486,7 @@ struct BenchmarkComparison {
             os << "  " << std::left << std::setw(25) << "  Std Dev (± ms)"
                << "  " << std::right << std::setw(17) << (has_seq ? format_std_str(seq_stats.time_total_algorithm_std) : "-")
                << "  " << std::right << std::setw(15) << (has_dcel ? format_std_str(dcel_stats.time_total_algorithm_std) : "-")
-               << "  " << std::right << std::setw(15) << format_std_str(cpu_stats.time_total_algorithm_std)
+               << "  " << std::right << std::setw(15) << (has_omp ? format_std_str(cpu_stats.time_total_algorithm_std) : "-")
                << "  " << std::right << std::setw(15) << (has_task ? format_std_str(task_stats.time_total_algorithm_std) : "-")
                << "  " << std::right << std::setw(14) << (has_gpu ? format_std_str(gpu_stats.time_total_algorithm_std) : "-")
                << "  " << std::right << std::setw(25) << "-\n";
@@ -503,7 +512,9 @@ struct BenchmarkComparison {
             if (has_dcel) {
                 os << "  >>> SPEEDUP GPolylla vs MPolylla DCEL " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_dcel << "x\n";
             }
-            os << "  >>> SPEEDUP GPolylla vs MPolylla Data " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_omp << "x\n";
+            if (has_omp) {
+                os << "  >>> SPEEDUP GPolylla vs MPolylla Data " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_omp << "x\n";
+            }
             if (has_task) {
                 os << "  >>> SPEEDUP GPolylla vs MPolylla Task " << std::left << std::setw(11) << omp_c_str << ":                " << std::right << std::setw(10) << std::fixed << std::setprecision(2) << speedup_gpu_vs_task << "x\n";
             }
@@ -643,6 +654,7 @@ struct BenchmarkComparison {
             << "  \"off_write_time_ms\": " << off_write_time_ms << ",\n"
             << "  \"has_sequential_baseline\": " << (has_seq ? "true" : "false") << ",\n"
             << "  \"has_omp_dcel\": " << (has_dcel ? "true" : "false") << ",\n"
+            << "  \"has_omp_data\": " << (has_omp ? "true" : "false") << ",\n"
             << "  \"has_omp_task\": " << (has_task ? "true" : "false") << ",\n"
             << "  \"has_gpu\": " << (has_gpu ? "true" : "false") << ",\n"
             << "  \"speedup_gpu_vs_sequential\": " << speedup_gpu_vs_seq << ",\n"
@@ -706,27 +718,29 @@ struct BenchmarkComparison {
             out << "\n  },\n";
         }
 
-        out << "  \"cpu_data\": {\n"
-            << "    \"n_vertices\": " << cpu_stats.n_vertices << ",\n"
-            << "    \"n_faces\": " << cpu_stats.n_faces << ",\n"
-            << "    \"n_half_edges\": " << cpu_stats.n_half_edges << ",\n"
-            << "    \"n_polygons\": " << cpu_stats.n_polygons << ",\n"
-            << "    \"runs\": " << cpu_stats.runs_count << ",\n"
-            << "    \"time_triangulation_generation\": " << cpu_stats.time_triangulation_generation << ",\n"
-            << "    \"time_label_max_edges\": " << cpu_stats.d_time_to_label_max_edges << ",\n"
-            << "    \"time_label_frontier_edges\": " << cpu_stats.d_time_to_label_frontier_edges << ",\n"
-            << "    \"time_label_seed_edges\": " << cpu_stats.d_time_to_label_seed_edges << ",\n"
-            << "    \"time_label_extra_frontier_edge\": " << cpu_stats.d_time_to_label_extra_frontier_edge << ",\n"
-            << "    \"time_traversal_1\": " << cpu_stats.d_time_to_traversal << ",\n"
-            << "    \"time_traversal_2\": " << cpu_stats.d_time_to_traversal_search_frontier_edge << ",\n"
-            << "    \"time_overwrite_seed\": " << cpu_stats.d_time_to_overwrite_seed << ",\n"
-            << "    \"time_label_scan_edges\": " << cpu_stats.d_time_to_label_scan_edges << ",\n"
-            << "    \"time_label_compaction_edges\": " << cpu_stats.d_time_to_label_compaction_edges << ",\n"
-            << "    \"time_total_algorithm\": " << cpu_stats.d_time_to_generate_polygonal_mesh << ",\n"
-            << "    \"time_total_algorithm_std\": " << cpu_stats.time_total_algorithm_std << ",\n"
-            << "    \"time_total_algorithm_runs\": ";
-        write_runs_array(out, cpu_stats.runs_total_times);
-        out << "\n  },\n";
+        if (has_omp) {
+            out << "  \"cpu_data\": {\n"
+                << "    \"n_vertices\": " << cpu_stats.n_vertices << ",\n"
+                << "    \"n_faces\": " << cpu_stats.n_faces << ",\n"
+                << "    \"n_half_edges\": " << cpu_stats.n_half_edges << ",\n"
+                << "    \"n_polygons\": " << cpu_stats.n_polygons << ",\n"
+                << "    \"runs\": " << cpu_stats.runs_count << ",\n"
+                << "    \"time_triangulation_generation\": " << cpu_stats.time_triangulation_generation << ",\n"
+                << "    \"time_label_max_edges\": " << cpu_stats.d_time_to_label_max_edges << ",\n"
+                << "    \"time_label_frontier_edges\": " << cpu_stats.d_time_to_label_frontier_edges << ",\n"
+                << "    \"time_label_seed_edges\": " << cpu_stats.d_time_to_label_seed_edges << ",\n"
+                << "    \"time_label_extra_frontier_edge\": " << cpu_stats.d_time_to_label_extra_frontier_edge << ",\n"
+                << "    \"time_traversal_1\": " << cpu_stats.d_time_to_traversal << ",\n"
+                << "    \"time_traversal_2\": " << cpu_stats.d_time_to_traversal_search_frontier_edge << ",\n"
+                << "    \"time_overwrite_seed\": " << cpu_stats.d_time_to_overwrite_seed << ",\n"
+                << "    \"time_label_scan_edges\": " << cpu_stats.d_time_to_label_scan_edges << ",\n"
+                << "    \"time_label_compaction_edges\": " << cpu_stats.d_time_to_label_compaction_edges << ",\n"
+                << "    \"time_total_algorithm\": " << cpu_stats.d_time_to_generate_polygonal_mesh << ",\n"
+                << "    \"time_total_algorithm_std\": " << cpu_stats.time_total_algorithm_std << ",\n"
+                << "    \"time_total_algorithm_runs\": ";
+            write_runs_array(out, cpu_stats.runs_total_times);
+            out << "\n  },\n";
+        }
 
         if (has_task) {
             out << "  \"cpu_tasks\": {\n"
@@ -817,6 +831,7 @@ struct MultiSeedSummary {
 
     bool has_seq = false;
     bool has_dcel = false;
+    bool has_omp = false;
     bool has_task = false;
 
     double speedup_gpu_vs_seq = 0.0;
@@ -834,6 +849,7 @@ struct MultiSeedSummary {
         int n = static_cast<int>(comparisons.size());
         has_seq = comparisons[0].has_seq;
         has_dcel = comparisons[0].has_dcel;
+        has_omp = comparisons[0].has_omp;
         has_task = comparisons[0].has_task;
         mesh_type = comparisons[0].mesh_type;
         requested_size = comparisons[0].requested_size;
@@ -846,12 +862,18 @@ struct MultiSeedSummary {
         double sum_seq = 0, sum_dcel = 0, sum_omp = 0, sum_task = 0, sum_gpu = 0, sum_gpu_cp = 0;
         for (const auto& c : comparisons) {
             seeds.push_back(c.seed);
-            sum_v += c.gpu_stats.n_vertices;
-            sum_f += c.gpu_stats.n_faces;
-            sum_p += c.gpu_stats.n_polygons;
+            if (c.has_gpu) {
+                sum_v += c.gpu_stats.n_vertices;
+                sum_f += c.gpu_stats.n_faces;
+                sum_p += c.gpu_stats.n_polygons;
+            } else if (c.has_omp) {
+                sum_v += c.cpu_stats.n_vertices;
+                sum_f += c.cpu_stats.n_faces;
+                sum_p += c.cpu_stats.n_polygons;
+            }
             if (has_seq) sum_seq += c.seq_stats.d_time_to_generate_polygonal_mesh;
             if (has_dcel) sum_dcel += c.dcel_stats.d_time_to_generate_polygonal_mesh;
-            sum_omp += c.cpu_stats.d_time_to_generate_polygonal_mesh;
+            if (has_omp) sum_omp += c.cpu_stats.d_time_to_generate_polygonal_mesh;
             if (has_task) sum_task += c.task_stats.d_time_to_generate_polygonal_mesh;
             sum_gpu += c.gpu_stats.d_time_to_generate_polygonal_mesh;
             sum_gpu_cp += c.gpu_stats.total_with_copies;
@@ -871,7 +893,7 @@ struct MultiSeedSummary {
             for (const auto& c : comparisons) {
                 if (has_seq) { double d = c.seq_stats.d_time_to_generate_polygonal_mesh - mean_seq_time; var_seq += d * d; }
                 if (has_dcel) { double d = c.dcel_stats.d_time_to_generate_polygonal_mesh - mean_dcel_time; var_dcel += d * d; }
-                { double d = c.cpu_stats.d_time_to_generate_polygonal_mesh - mean_omp_time; var_omp += d * d; }
+                if (has_omp) { double d = c.cpu_stats.d_time_to_generate_polygonal_mesh - mean_omp_time; var_omp += d * d; }
                 if (has_task) { double d = c.task_stats.d_time_to_generate_polygonal_mesh - mean_task_time; var_task += d * d; }
                 { double d = c.gpu_stats.d_time_to_generate_polygonal_mesh - mean_gpu_time; var_gpu += d * d; }
                 { double d = c.gpu_stats.total_with_copies - mean_gpu_with_copies_time; var_gpu_cp += d * d; }
@@ -887,16 +909,16 @@ struct MultiSeedSummary {
         if (has_seq && mean_seq_time > 0.0) {
             if (mean_gpu_time > 0.0) speedup_gpu_vs_seq = mean_seq_time / mean_gpu_time;
             if (has_dcel && mean_dcel_time > 0.0) speedup_dcel_vs_seq = mean_seq_time / mean_dcel_time;
-            if (mean_omp_time > 0.0) speedup_omp_vs_seq = mean_seq_time / mean_omp_time;
+            if (has_omp && mean_omp_time > 0.0) speedup_omp_vs_seq = mean_seq_time / mean_omp_time;
             if (has_task && mean_task_time > 0.0) speedup_task_vs_seq = mean_seq_time / mean_task_time;
             if (mean_gpu_with_copies_time > 0.0) speedup_gpu_with_copies_vs_seq = mean_seq_time / mean_gpu_with_copies_time;
         }
         if (mean_gpu_time > 0.0) {
             if (has_dcel && mean_dcel_time > 0.0) speedup_gpu_vs_dcel = mean_dcel_time / mean_gpu_time;
-            if (mean_omp_time > 0.0) speedup_gpu_vs_omp = mean_omp_time / mean_gpu_time;
+            if (has_omp && mean_omp_time > 0.0) speedup_gpu_vs_omp = mean_omp_time / mean_gpu_time;
             if (has_task && mean_task_time > 0.0) speedup_gpu_vs_task = mean_task_time / mean_gpu_time;
         }
-        if (has_task && mean_task_time > 0.0 && mean_omp_time > 0.0) {
+        if (has_task && has_omp && mean_task_time > 0.0 && mean_omp_time > 0.0) {
             speedup_task_vs_omp = mean_omp_time / mean_task_time;
         }
     }
@@ -924,7 +946,7 @@ struct MultiSeedSummary {
         for (const auto& c : comparisons) {
             std::string s_seq = has_seq ? (std::to_string(c.seq_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms") : "-";
             std::string s_dcel = has_dcel ? (std::to_string(c.dcel_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms") : "-";
-            std::string s_omp = std::to_string(c.cpu_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms";
+            std::string s_omp = has_omp ? (std::to_string(c.cpu_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms") : "-";
             std::string s_task = has_task ? (std::to_string(c.task_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms") : "-";
             std::string s_gpu = std::to_string(c.gpu_stats.d_time_to_generate_polygonal_mesh).substr(0, 8) + " ms";
             std::string s_sp = (c.speedup_gpu_vs_seq > 0.0) ? (std::to_string(c.speedup_gpu_vs_seq).substr(0, 5) + "x") : "-";
@@ -949,7 +971,7 @@ struct MultiSeedSummary {
 
         std::string m_seq = fmt_mean_std(mean_seq_time, std_seq_time, has_seq);
         std::string m_dcel = fmt_mean_std(mean_dcel_time, std_dcel_time, has_dcel);
-        std::string m_omp = fmt_mean_std(mean_omp_time, std_omp_time, true);
+        std::string m_omp = fmt_mean_std(mean_omp_time, std_omp_time, has_omp);
         std::string m_task = fmt_mean_std(mean_task_time, std_task_time, has_task);
         std::string m_gpu = fmt_mean_std(mean_gpu_time, std_gpu_time, true);
         std::string m_sp = (speedup_gpu_vs_seq > 0.0) ? (std::to_string(speedup_gpu_vs_seq).substr(0, 5) + "x") : "-";
