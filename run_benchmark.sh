@@ -16,7 +16,10 @@ if [ ! -f "${SCRIPT_DIR}/submodules/GPolylla/CMakeLists.txt" ] || \
    [ ! -f "${SCRIPT_DIR}/submodules/MPolylla-Task/CMakeLists.txt" ] || \
    [ ! -f "${SCRIPT_DIR}/submodules/MPolylla-Mesh-DCEL/CMakeLists.txt" ]; then
     echo "[PPolylla] Initializing and updating git submodules..."
-    git submodule update --init --recursive
+    git submodule update --init --recursive || {
+        echo "[PPolylla] Direct commit fetch failed. Trying fallback to remote tracking branches..."
+        git submodule update --init --remote --recursive
+    }
 fi
 
 # Build project if binary doesn't exist

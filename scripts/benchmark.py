@@ -38,7 +38,11 @@ def ensure_built():
         ]
         if any(not p.exists() for p in required_submodules):
             print("[Submodules] Initializing and updating git submodules...")
-            subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=PROJECT_ROOT)
+            try:
+                subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=PROJECT_ROOT)
+            except subprocess.CalledProcessError:
+                print("[Submodules] Direct commit fetch failed. Retrying with remote branches...")
+                subprocess.check_call(["git", "submodule", "update", "--init", "--remote", "--recursive"], cwd=PROJECT_ROOT)
 
         cuda_arch = os.environ.get("CUDA_ARCH", "native")
         print(f"[Build] {BINARY} not found. Running CMake (CUDA_ARCH={cuda_arch}) and Make...")
