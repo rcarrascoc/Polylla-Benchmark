@@ -63,15 +63,15 @@ bool run_mpolylla_from_memory(const MemoryMesh* mesh, const char* out_json_path,
 
         poly_mesh.h_max_edges = new bit_vector_d[poly_mesh.n_halfedges];
         poly_mesh.h_frontier_edges = new bit_vector_d[poly_mesh.n_halfedges];
-        poly_mesh.h_seed_edges = new int[poly_mesh.n_halfedges];
-        poly_mesh.h_scan = new int[poly_mesh.n_halfedges];
+        poly_mesh.h_seed_edges = new bit_vector_d[poly_mesh.n_halfedges];
+        poly_mesh.h_scan = nullptr;
         poly_mesh.h_seed_edges_comp = new int[poly_mesh.n_halfedges];
 
-        memset(poly_mesh.h_max_edges, 0, sizeof(bit_vector_d) * poly_mesh.n_halfedges);
-        memset(poly_mesh.h_frontier_edges, 0, sizeof(bit_vector_d) * poly_mesh.n_halfedges);
-        memset(poly_mesh.h_seed_edges, 0, sizeof(int) * poly_mesh.n_halfedges);
-        memset(poly_mesh.h_scan, 0, sizeof(int) * poly_mesh.n_halfedges);
-        memset(poly_mesh.h_seed_edges_comp, 0, sizeof(int) * poly_mesh.n_halfedges);
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < poly_mesh.n_halfedges; i++) {
+            poly_mesh.h_max_edges[i] = 0;
+            poly_mesh.h_seed_edges[i] = 0;
+        }
 
         poly_mesh.construct_Polylla();
         poly_mesh.print_stats(json_str);
