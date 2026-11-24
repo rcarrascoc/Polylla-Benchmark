@@ -38,11 +38,7 @@ def ensure_built():
         ]
         if any(not p.exists() for p in required_submodules):
             print("[Submodules] Initializing and updating git submodules...")
-            try:
-                subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=PROJECT_ROOT)
-            except subprocess.CalledProcessError:
-                print("[Submodules] Direct commit fetch failed. Retrying with remote branches...")
-                subprocess.check_call(["git", "submodule", "update", "--init", "--remote", "--recursive"], cwd=PROJECT_ROOT)
+            subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=PROJECT_ROOT)
 
         cuda_arch = os.environ.get("CUDA_ARCH", "native")
         print(f"[Build] {BINARY} not found. Running CMake (CUDA_ARCH={cuda_arch}) and Make...")
@@ -327,14 +323,17 @@ def run_sweep(mesh_type: str, sizes: list, seeds: list, runs: int = 1, threads: 
         generate_plots(df, mesh_type, seed=seeds[0], seeds_info=(seeds_label if is_multi_seed else ""), runs=runs)
 
 def generate_plots(df: pd.DataFrame, mesh_type: str, seed: int = 42, seeds_info: str = "", runs: int = 1):
-    """Delegates to standalone plot module for unified plotting."""
+    """Delegates to standalone plot module for unified plotting (generating both PNG and PDF)."""
     try:
-        from plot import plot_benchmark_data
-        plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=PLOTS_DIR, seeds_info=seeds_info, runs=runs)
+        from plot import plot_benchmark_data, PLOTS_DIR, PLOTS_PDF_DIR
     except ImportError:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from plot import plot_benchmark_data
-        plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=PLOTS_DIR, seeds_info=seeds_info, runs=runs)
+        from plot import plot_benchmark_data, PLOTS_DIR, PLOTS_PDF_DIR
+
+    print("[Plots] Generating standard PNG visualizations in plots/...")
+    plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=PLOTS_DIR, seeds_info=seeds_info, runs=runs, formats=["png"], show_title=True)
+    print("[Plots] Generating publication-ready vector PDFs (no title) in plots_pdf/...")
+    plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=PLOTS_PDF_DIR, seeds_info=seeds_info, runs=runs, formats=["pdf"], show_title=False)
 
 def main():
     parser = argparse.ArgumentParser(description="PPolylla Parallel Benchmark Suite (Sequential vs OpenMP vs CUDA)")

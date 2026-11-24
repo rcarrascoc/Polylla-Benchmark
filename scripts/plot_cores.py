@@ -2,15 +2,19 @@
 """
 PPolylla OpenMP Cores & Thread Scalability Plotting Tool
 Generates standalone strong-scaling visualizations for OpenMP variants:
-  1. cores_<type>_<size>_time.{png,pdf}: Execution Time (ms) vs Number of Threads (Line chart).
-  2. cores_<type>_<size>_time_bar.{png,pdf}: Execution Time (ms) vs Number of Threads (Grouped Bar chart).
-  3. cores_<type>_<size>_time_bar_log.{png,pdf}: Execution Time (ms) vs Number of Threads (Logarithmic Bar chart).
-  4. cores_<type>_<size>_speedup.{png,pdf}: Speedup vs Sequential Baseline vs Number of Threads.
-  5. cores_<type>_<size>_self_speedup.{png,pdf}: Self-Speedup (T(1) / T(p)) vs Number of Threads.
-  6. cores_<type>_<size>_efficiency.{png,pdf}: Parallel Efficiency (%) vs Number of Threads.
+  1. cores_<type>_<size>_time.{png,pdf} / _time_linear.{png,pdf}: Execution Time (ms) vs Number of Threads (Line chart).
+  2. cores_<type>_<size>_time_log.{png,pdf}: Execution Time (ms) vs Number of Threads (Logarithmic Line chart).
+  3. cores_<type>_<size>_time_bar.{png,pdf}: Execution Time (ms) vs Number of Threads (Grouped Bar chart).
+  4. cores_<type>_<size>_time_bar_log.{png,pdf}: Execution Time (ms) vs Number of Threads (Logarithmic Bar chart).
+  5. cores_<type>_<size>_speedup.{png,pdf} / _speedup_linear.{png,pdf}: Speedup vs Sequential Baseline vs Threads.
+  6. cores_<type>_<size>_speedup_log.{png,pdf}: Speedup vs Sequential Baseline (Logarithmic Scale).
+  7. cores_<type>_<size>_self_speedup.{png,pdf}: Self-Speedup (T(1) / T(p)) vs Number of Threads.
+  8. cores_<type>_<size>_self_speedup_log.{png,pdf}: Self-Speedup (Logarithmic Scale).
+  9. cores_<type>_<size>_efficiency.{png,pdf}: Parallel Efficiency (%) vs Number of Threads.
 
-Complies with publication standards: TrueType (Type 42) fonts, 1:1 square ratio,
-2-column legend below the plot, and optional title omission for LaTeX paper integration.
+Complies with publication standards: TrueType (Type 42) font embedding for IEEE/ACM,
+standardized publication aspect ratio, 2-column legend below plot, and automated dual-output
+(standard PNG with title in plots/ and publication vector PDF without title in plots_pdf/).
 """
 
 import os
@@ -172,61 +176,88 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
     prefix = f"cores_{mesh_type}_{size}"
 
     # -------------------------------------------------------------------------
-    # 1. TIME PLOT (Execution Time vs Threads)
+    # 1. TIME LINE PLOTS (Execution Time vs Threads: Linear & Logarithmic)
     # -------------------------------------------------------------------------
+    def draw_time_lines(ax, log_scale=False):
+        if dcel_time_col:
+            ax.plot(threads_series, df[dcel_time_col], marker="s", markersize=5.5,
+                    color="#ff7f0e", linewidth=1.8, label="MPolylla DCEL")
+            if dcel_std_col and (df[dcel_std_col] > 0).any():
+                ax.fill_between(threads_series,
+                                np.maximum(0.001, df[dcel_time_col] - df[dcel_std_col]),
+                                df[dcel_time_col] + df[dcel_std_col],
+                                color="#ff7f0e", alpha=0.18)
+
+        if data_time_col:
+            ax.plot(threads_series, df[data_time_col], marker="^", markersize=5.5,
+                    color="#1f77b4", linewidth=1.8, label="MPolylla Data")
+            if data_std_col and (df[data_std_col] > 0).any():
+                ax.fill_between(threads_series,
+                                np.maximum(0.001, df[data_time_col] - df[data_std_col]),
+                                df[data_time_col] + df[data_std_col],
+                                color="#1f77b4", alpha=0.18)
+
+        if task_time_col:
+            ax.plot(threads_series, df[task_time_col], marker="v", markersize=5.5,
+                    color="#9467bd", linewidth=1.8, label="MPolylla Task")
+            if task_std_col and (df[task_std_col] > 0).any():
+                ax.fill_between(threads_series,
+                                np.maximum(0.001, df[task_time_col] - df[task_std_col]),
+                                df[task_time_col] + df[task_std_col],
+                                color="#9467bd", alpha=0.18)
+
+        if has_seq:
+            ax.axhline(seq_time_val, color="#7f7f7f", linestyle="--", linewidth=1.5,
+                       label=f"Polylla-Mesh-DCEL ({seq_time_val:.1f} ms)")
+
+        if has_gpu:
+            ax.axhline(gpu_time_val, color="#2ca02c", linestyle=":", linewidth=1.8,
+                       label=f"GPolylla ({gpu_time_val:.1f} ms)")
+
+        ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
+        ax.set_xticks(x_ticks)
+        ax.tick_params(labelsize=9)
+
+        if log_scale:
+            ax.set_yscale("log")
+            ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=10.5, fontweight="bold")
+            ax.grid(True, which="both", linestyle="--", alpha=0.6)
+        else:
+            ax.set_ylabel("Execution Time (ms)", fontsize=10.5, fontweight="bold")
+            ax.grid(True, linestyle="--", alpha=0.6)
+
+    # 1a. Time Linear Line Plot
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
-    if dcel_time_col:
-        ax.plot(threads_series, df[dcel_time_col], marker="s", markersize=6.0,
-                color="#ff7f0e", linewidth=2.0, label="MPolylla DCEL")
-        if dcel_std_col and (df[dcel_std_col] > 0).any():
-            ax.fill_between(threads_series,
-                            np.maximum(0.001, df[dcel_time_col] - df[dcel_std_col]),
-                            df[dcel_time_col] + df[dcel_std_col],
-                            color="#ff7f0e", alpha=0.18)
-
-    if data_time_col:
-        ax.plot(threads_series, df[data_time_col], marker="^", markersize=6.0,
-                color="#1f77b4", linewidth=2.0, label="MPolylla Data")
-        if data_std_col and (df[data_std_col] > 0).any():
-            ax.fill_between(threads_series,
-                            np.maximum(0.001, df[data_time_col] - df[data_std_col]),
-                            df[data_time_col] + df[data_std_col],
-                            color="#1f77b4", alpha=0.18)
-
-    if task_time_col:
-        ax.plot(threads_series, df[task_time_col], marker="v", markersize=6.0,
-                color="#9467bd", linewidth=2.0, label="MPolylla Task")
-        if task_std_col and (df[task_std_col] > 0).any():
-            ax.fill_between(threads_series,
-                            np.maximum(0.001, df[task_time_col] - df[task_std_col]),
-                            df[task_time_col] + df[task_std_col],
-                            color="#9467bd", alpha=0.18)
-
-    if has_seq:
-        ax.axhline(seq_time_val, color="#7f7f7f", linestyle="--", linewidth=1.5,
-                   label=f"Polylla-Mesh-DCEL ({seq_time_val:.1f} ms)")
-
-    if has_gpu:
-        ax.axhline(gpu_time_val, color="#2ca02c", linestyle=":", linewidth=1.8,
-                   label=f"GPolylla ({gpu_time_val:.1f} ms)")
-
-    ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
-    ax.set_ylabel("Execution Time (ms)", fontsize=10.5, fontweight="bold")
-    ax.set_xticks(x_ticks)
+    draw_time_lines(ax, log_scale=False)
     if show_title:
         ax.set_title(f"OpenMP Polylla Execution Time vs Cores\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
-    ax.grid(True, linestyle="--", alpha=0.6)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
     fig.tight_layout()
 
     for fmt in formats:
         time_path = output_dir / f"{prefix}_time.{fmt}"
+        time_lin_path = output_dir / f"{prefix}_time_linear.{fmt}"
         fig.savefig(time_path, bbox_inches="tight", dpi=300)
+        fig.savefig(time_lin_path, bbox_inches="tight", dpi=300)
         print(f"  [+] Saved Cores Time Plot:         {time_path}")
     plt.close(fig)
 
+    # 1b. Time Logarithmic Line Plot
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
+    draw_time_lines(ax, log_scale=True)
+    if show_title:
+        ax.set_title(f"OpenMP Polylla Execution Time vs Cores (Log Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
+    fig.tight_layout()
+
+    for fmt in formats:
+        time_log_path = output_dir / f"{prefix}_time_log.{fmt}"
+        fig.savefig(time_log_path, bbox_inches="tight", dpi=300)
+        print(f"  [+] Saved Cores Time Log Plot:     {time_log_path}")
+    plt.close(fig)
+
     # -------------------------------------------------------------------------
-    # 1b. TIME BAR PLOT (Grouped Bar Chart: Execution Time vs Threads)
+    # 1c. TIME BAR PLOTS (Grouped Bar Chart: Linear & Logarithmic)
     # -------------------------------------------------------------------------
     x_indices = np.arange(len(threads_series))
     bar_variants = []
@@ -280,6 +311,7 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
         ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
         ax.set_xticks(x_indices)
         ax.set_xticklabels([str(t) for t in threads_series])
+        ax.tick_params(labelsize=9)
         if log_scale:
             ax.set_yscale("log")
             ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=10.5, fontweight="bold")
@@ -288,7 +320,7 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
             ax.set_ylabel("Execution Time (ms)", fontsize=10.5, fontweight="bold")
             ax.grid(True, linestyle="--", alpha=0.6, axis="y", zorder=0)
 
-    # 1b.1 Linear Bar Chart
+    # 1c.1 Linear Bar Chart
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
     draw_time_bars(ax, log_scale=False)
     if show_title:
@@ -301,7 +333,7 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
         print(f"  [+] Saved Cores Time Bar Plot:     {bar_path}")
     plt.close(fig)
 
-    # 1b.2 Logarithmic Bar Chart
+    # 1c.2 Logarithmic Bar Chart
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
     draw_time_bars(ax, log_scale=True)
     if show_title:
@@ -313,85 +345,125 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
         fig.savefig(bar_log_path, bbox_inches="tight", dpi=300)
         print(f"  [+] Saved Cores Time Bar Log Plot: {bar_log_path}")
     plt.close(fig)
+
+    # -------------------------------------------------------------------------
+    # 2. SPEEDUP PLOTS VS SEQUENTIAL BASELINE (Linear & Logarithmic)
+    # -------------------------------------------------------------------------
     if has_seq:
+        def draw_speedup_curves(ax, log_scale=False):
+            endpoints = []
+            if dcel_time_col and "speedup_dcel_seq" in df.columns:
+                ax.plot(threads_series, df["speedup_dcel_seq"], marker="s", markersize=5.5,
+                        color="#ff7f0e", linewidth=1.8, label="MPolylla DCEL")
+                endpoints.append({"val": df["speedup_dcel_seq"].iloc[-1], "color": "#ff7f0e", "text": f"{df['speedup_dcel_seq'].iloc[-1]:.1f}x"})
+
+            if data_time_col and "speedup_data_seq" in df.columns:
+                ax.plot(threads_series, df["speedup_data_seq"], marker="^", markersize=5.5,
+                        color="#1f77b4", linewidth=1.8, label="MPolylla Data")
+                endpoints.append({"val": df["speedup_data_seq"].iloc[-1], "color": "#1f77b4", "text": f"{df['speedup_data_seq'].iloc[-1]:.1f}x"})
+
+            if task_time_col and "speedup_task_seq" in df.columns:
+                ax.plot(threads_series, df["speedup_task_seq"], marker="v", markersize=5.5,
+                        color="#9467bd", linewidth=1.8, label="MPolylla Task")
+                endpoints.append({"val": df["speedup_task_seq"].iloc[-1], "color": "#9467bd", "text": f"{df['speedup_task_seq'].iloc[-1]:.1f}x"})
+
+            # Ideal linear speedup reference line
+            ax.plot([x_min, x_max], [x_min, x_max], color="#bbbbbb", linestyle="-.", linewidth=1.2, label="Ideal Linear (y = x)")
+            ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.2, label="Baseline (1.0x)")
+
+            ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
+            ax.set_xticks(x_ticks)
+            ax.tick_params(labelsize=9)
+
+            x_span = x_max - x_min if x_max > x_min else x_max
+            ax.set_xlim(x_min - 0.04 * x_span, x_max + 0.18 * x_span)
+
+            if log_scale:
+                ax.set_yscale("log")
+                ax.set_ylabel("Speedup vs Baseline (Log Scale)", fontsize=10.5, fontweight="bold")
+                ax.grid(True, which="both", linestyle="--", alpha=0.6)
+            else:
+                ax.set_ylabel("Speedup Factor vs Sequential Baseline", fontsize=10.5, fontweight="bold")
+                ax.grid(True, linestyle="--", alpha=0.6)
+            return endpoints
+
+        # 2a. Speedup Linear Plot
         fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
-        endpoints = []
-
-        if dcel_time_col and "speedup_dcel_seq" in df.columns:
-            ax.plot(threads_series, df["speedup_dcel_seq"], marker="s", markersize=6.0,
-                    color="#ff7f0e", linewidth=2.0, label="MPolylla DCEL")
-            endpoints.append({"val": df["speedup_dcel_seq"].iloc[-1], "color": "#ff7f0e", "text": f"{df['speedup_dcel_seq'].iloc[-1]:.1f}x"})
-
-        if data_time_col and "speedup_data_seq" in df.columns:
-            ax.plot(threads_series, df["speedup_data_seq"], marker="^", markersize=6.0,
-                    color="#1f77b4", linewidth=2.0, label="MPolylla Data")
-            endpoints.append({"val": df["speedup_data_seq"].iloc[-1], "color": "#1f77b4", "text": f"{df['speedup_data_seq'].iloc[-1]:.1f}x"})
-
-        if task_time_col and "speedup_task_seq" in df.columns:
-            ax.plot(threads_series, df["speedup_task_seq"], marker="v", markersize=6.0,
-                    color="#9467bd", linewidth=2.0, label="MPolylla Task")
-            endpoints.append({"val": df["speedup_task_seq"].iloc[-1], "color": "#9467bd", "text": f"{df['speedup_task_seq'].iloc[-1]:.1f}x"})
-
-        # Ideal linear speedup reference line
-        ax.plot([x_min, x_max], [x_min, x_max], color="#bbbbbb", linestyle="-.", linewidth=1.2, label="Ideal Linear (y = x)")
-        ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.2, label="Baseline (1.0x)")
-
-        ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
-        ax.set_ylabel("Speedup Factor vs Sequential Baseline", fontsize=10.5, fontweight="bold")
-        ax.set_xticks(x_ticks)
-
-        x_span = x_max - x_min if x_max > x_min else x_max
-        ax.set_xlim(x_min - 0.04 * x_span, x_max + 0.18 * x_span)
-
+        endpoints = draw_speedup_curves(ax, log_scale=False)
         if show_title:
             ax.set_title(f"OpenMP Polylla Speedup vs Baseline\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
-        ax.grid(True, linestyle="--", alpha=0.6)
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
         fig.tight_layout()
         annotate_endpoints(ax, endpoints, threads_series.iloc[-1], fig, baseline_val=1.0)
 
         for fmt in formats:
             sp_path = output_dir / f"{prefix}_speedup.{fmt}"
+            sp_lin_path = output_dir / f"{prefix}_speedup_linear.{fmt}"
             fig.savefig(sp_path, bbox_inches="tight", dpi=300)
+            fig.savefig(sp_lin_path, bbox_inches="tight", dpi=300)
             print(f"  [+] Saved Cores Speedup Plot:      {sp_path}")
         plt.close(fig)
 
+        # 2b. Speedup Logarithmic Plot
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
+        endpoints = draw_speedup_curves(ax, log_scale=True)
+        if show_title:
+            ax.set_title(f"OpenMP Polylla Speedup vs Baseline (Log Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
+        fig.tight_layout()
+        annotate_endpoints(ax, endpoints, threads_series.iloc[-1], fig, baseline_val=1.0)
+
+        for fmt in formats:
+            sp_log_path = output_dir / f"{prefix}_speedup_log.{fmt}"
+            fig.savefig(sp_log_path, bbox_inches="tight", dpi=300)
+            print(f"  [+] Saved Cores Speedup Log Plot:  {sp_log_path}")
+        plt.close(fig)
+
     # -------------------------------------------------------------------------
-    # 3. SELF-SPEEDUP PLOT (T(1) / T(p))
+    # 3. SELF-SPEEDUP PLOTS (T(1) / T(p): Linear & Logarithmic)
     # -------------------------------------------------------------------------
     if has_1_thread:
+        def draw_self_speedup_curves(ax, log_scale=False):
+            endpoints = []
+            if "self_sp_dcel" in df.columns:
+                ax.plot(threads_series, df["self_sp_dcel"], marker="s", markersize=5.5,
+                        color="#ff7f0e", linewidth=1.8, label="MPolylla DCEL")
+                endpoints.append({"val": df["self_sp_dcel"].iloc[-1], "color": "#ff7f0e", "text": f"{df['self_sp_dcel'].iloc[-1]:.1f}x"})
+
+            if "self_sp_data" in df.columns:
+                ax.plot(threads_series, df["self_sp_data"], marker="^", markersize=5.5,
+                        color="#1f77b4", linewidth=1.8, label="MPolylla Data")
+                endpoints.append({"val": df["self_sp_data"].iloc[-1], "color": "#1f77b4", "text": f"{df['self_sp_data'].iloc[-1]:.1f}x"})
+
+            if "self_sp_task" in df.columns:
+                ax.plot(threads_series, df["self_sp_task"], marker="v", markersize=5.5,
+                        color="#9467bd", linewidth=1.8, label="MPolylla Task")
+                endpoints.append({"val": df["self_sp_task"].iloc[-1], "color": "#9467bd", "text": f"{df['self_sp_task'].iloc[-1]:.1f}x"})
+
+            ax.plot([x_min, x_max], [x_min, x_max], color="#bbbbbb", linestyle="-.", linewidth=1.2, label="Ideal Linear (y = x)")
+            ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.2, label="Single-Thread (1.0x)")
+
+            ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
+            ax.set_xticks(x_ticks)
+            ax.tick_params(labelsize=9)
+
+            x_span = x_max - x_min if x_max > x_min else x_max
+            ax.set_xlim(x_min - 0.04 * x_span, x_max + 0.18 * x_span)
+
+            if log_scale:
+                ax.set_yscale("log")
+                ax.set_ylabel("Self-Speedup (T(1) / T(p)) (Log Scale)", fontsize=10.5, fontweight="bold")
+                ax.grid(True, which="both", linestyle="--", alpha=0.6)
+            else:
+                ax.set_ylabel("Self-Speedup (T(1) / T(p))", fontsize=10.5, fontweight="bold")
+                ax.grid(True, linestyle="--", alpha=0.6)
+            return endpoints
+
+        # 3a. Self-Speedup Linear Plot
         fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
-        endpoints = []
-
-        if "self_sp_dcel" in df.columns:
-            ax.plot(threads_series, df["self_sp_dcel"], marker="s", markersize=6.0,
-                    color="#ff7f0e", linewidth=2.0, label="MPolylla DCEL")
-            endpoints.append({"val": df["self_sp_dcel"].iloc[-1], "color": "#ff7f0e", "text": f"{df['self_sp_dcel'].iloc[-1]:.1f}x"})
-
-        if "self_sp_data" in df.columns:
-            ax.plot(threads_series, df["self_sp_data"], marker="^", markersize=6.0,
-                    color="#1f77b4", linewidth=2.0, label="MPolylla Data")
-            endpoints.append({"val": df["self_sp_data"].iloc[-1], "color": "#1f77b4", "text": f"{df['self_sp_data'].iloc[-1]:.1f}x"})
-
-        if "self_sp_task" in df.columns:
-            ax.plot(threads_series, df["self_sp_task"], marker="v", markersize=6.0,
-                    color="#9467bd", linewidth=2.0, label="MPolylla Task")
-            endpoints.append({"val": df["self_sp_task"].iloc[-1], "color": "#9467bd", "text": f"{df['self_sp_task'].iloc[-1]:.1f}x"})
-
-        # Ideal linear speedup reference line
-        ax.plot([x_min, x_max], [x_min, x_max], color="#bbbbbb", linestyle="-.", linewidth=1.2, label="Ideal Linear (y = x)")
-        ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.2, label="Single-Thread (1.0x)")
-
-        ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
-        ax.set_ylabel("Self-Speedup (T(1) / T(p))", fontsize=10.5, fontweight="bold")
-        ax.set_xticks(x_ticks)
-
-        x_span = x_max - x_min if x_max > x_min else x_max
-        ax.set_xlim(x_min - 0.04 * x_span, x_max + 0.18 * x_span)
-
+        endpoints = draw_self_speedup_curves(ax, log_scale=False)
         if show_title:
             ax.set_title(f"OpenMP Polylla Self-Speedup (Strong Scaling)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
-        ax.grid(True, linestyle="--", alpha=0.6)
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
         fig.tight_layout()
         annotate_endpoints(ax, endpoints, threads_series.iloc[-1], fig, baseline_val=1.0)
@@ -402,6 +474,21 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
             print(f"  [+] Saved Cores Self-Speedup Plot: {self_sp_path}")
         plt.close(fig)
 
+        # 3b. Self-Speedup Logarithmic Plot
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
+        endpoints = draw_self_speedup_curves(ax, log_scale=True)
+        if show_title:
+            ax.set_title(f"OpenMP Polylla Self-Speedup (Log Scale)\n{title_sub}", fontsize=11, fontweight="bold", pad=10)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5, frameon=True, framealpha=0.95)
+        fig.tight_layout()
+        annotate_endpoints(ax, endpoints, threads_series.iloc[-1], fig, baseline_val=1.0)
+
+        for fmt in formats:
+            self_sp_log_path = output_dir / f"{prefix}_self_speedup_log.{fmt}"
+            fig.savefig(self_sp_log_path, bbox_inches="tight", dpi=300)
+            print(f"  [+] Saved Cores Self-Speedup Log:  {self_sp_log_path}")
+        plt.close(fig)
+
     # -------------------------------------------------------------------------
     # 4. PARALLEL EFFICIENCY PLOT (E = S(p)/p * 100%)
     # -------------------------------------------------------------------------
@@ -409,22 +496,23 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
         fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
 
         if "eff_dcel" in df.columns:
-            ax.plot(threads_series, df["eff_dcel"], marker="s", markersize=6.0,
-                    color="#ff7f0e", linewidth=2.0, label="MPolylla DCEL")
+            ax.plot(threads_series, df["eff_dcel"], marker="s", markersize=5.5,
+                    color="#ff7f0e", linewidth=1.8, label="MPolylla DCEL")
 
         if "eff_data" in df.columns:
-            ax.plot(threads_series, df["eff_data"], marker="^", markersize=6.0,
-                    color="#1f77b4", linewidth=2.0, label="MPolylla Data")
+            ax.plot(threads_series, df["eff_data"], marker="^", markersize=5.5,
+                    color="#1f77b4", linewidth=1.8, label="MPolylla Data")
 
         if "eff_task" in df.columns:
-            ax.plot(threads_series, df["eff_task"], marker="v", markersize=6.0,
-                    color="#9467bd", linewidth=2.0, label="MPolylla Task")
+            ax.plot(threads_series, df["eff_task"], marker="v", markersize=5.5,
+                    color="#9467bd", linewidth=1.8, label="MPolylla Task")
 
         ax.axhline(100.0, color="#7f7f7f", linestyle="--", linewidth=1.3, label="Ideal Efficiency (100%)")
 
         ax.set_xlabel("Number of OpenMP Threads / Cores", fontsize=10.5, fontweight="bold")
         ax.set_ylabel("Parallel Efficiency (%)", fontsize=10.5, fontweight="bold")
         ax.set_xticks(x_ticks)
+        ax.tick_params(labelsize=9)
         ax.set_ylim(bottom=0.0, top=110.0)
 
         if show_title:
@@ -439,8 +527,15 @@ def plot_cores_data(df: pd.DataFrame, mesh_type: str = "uniform", size: int = 10
             print(f"  [+] Saved Cores Efficiency Plot:   {eff_path}")
         plt.close(fig)
 
-def plot_cores_file(csv_path: Path, output_dir: Path = PLOTS_DIR, formats: list = None, show_title: bool = True):
-    """Parses a cores CSV file and triggers plot generation."""
+def plot_cores_file(csv_path: Path, output_dir: Path = None, formats: list = None,
+                    show_title: bool = None, both: bool = False):
+    """
+    Parses a cores CSV file and triggers plot generation.
+    If output_dir and formats are not explicitly provided (default run),
+    it generates BOTH:
+      1. PNG plots with titles in plots/
+      2. Publication-ready vector PDFs without titles in plots_pdf/
+    """
     if not csv_path.exists():
         print(f"[Error] File not found: {csv_path}")
         return False
@@ -461,7 +556,7 @@ def plot_cores_file(csv_path: Path, output_dir: Path = PLOTS_DIR, formats: list 
     affinity_info = ""
 
     parts = filename.split("_")
-    for i, part in enumerate(parts):
+    for part in parts:
         if part in ["uniform", "grid"]:
             mesh_type = part
         elif part.isdigit() and int(part) >= 1000:
@@ -485,9 +580,26 @@ def plot_cores_file(csv_path: Path, output_dir: Path = PLOTS_DIR, formats: list 
     if "cpu_cores_affinity" in df.columns and pd.notnull(df["cpu_cores_affinity"].iloc[0]):
         affinity_info = str(df["cpu_cores_affinity"].iloc[0])
 
-    plot_cores_data(df, mesh_type=mesh_type, size=size, seed=seed, output_dir=output_dir,
-                    seeds_info=seeds_info, runs=runs, affinity_info=affinity_info,
-                    formats=formats, show_title=show_title)
+    # Determine whether dual generation (PNG + PDF) should run
+    is_dual = both or (output_dir is None and formats is None and show_title is None)
+
+    if is_dual:
+        print("[Cores Plotter] Generating standard PNG visualizations in plots/...")
+        plot_cores_data(df, mesh_type=mesh_type, size=size, seed=seed, output_dir=PLOTS_DIR,
+                        seeds_info=seeds_info, runs=runs, affinity_info=affinity_info,
+                        formats=["png"], show_title=True)
+        print("[Cores Plotter] Generating publication-ready vector PDFs (no title) in plots_pdf/...")
+        plot_cores_data(df, mesh_type=mesh_type, size=size, seed=seed, output_dir=PLOTS_PDF_DIR,
+                        seeds_info=seeds_info, runs=runs, affinity_info=affinity_info,
+                        formats=["pdf"], show_title=False)
+    else:
+        target_dir = output_dir if output_dir is not None else PLOTS_DIR
+        target_formats = formats if formats is not None else ["png"]
+        target_title = show_title if show_title is not None else True
+
+        plot_cores_data(df, mesh_type=mesh_type, size=size, seed=seed, output_dir=target_dir,
+                        seeds_info=seeds_info, runs=runs, affinity_info=affinity_info,
+                        formats=target_formats, show_title=target_title)
     return True
 
 def main():
@@ -495,43 +607,80 @@ def main():
         description="Standalone Plotting Tool for PPolylla OpenMP Cores Scalability Results",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python3 scripts/plot_cores.py                                     # Automatically plots latest cores_*.csv
-  python3 scripts/plot_cores.py --all                               # Plots all cores_*.csv in results/
-  python3 scripts/plot_cores.py --pdf --all                         # Publication-ready vector PDFs in plots_pdf/
+  # Automatically plots latest cores_*.csv (generating BOTH PNG in plots/ and PDF in plots_pdf/):
+  python3 scripts/plot_cores.py
+
+  # Plot a specific cores scaling CSV:
   python3 scripts/plot_cores.py results/cores_uniform_1000000.csv
+
+  # Plot multiple cores scaling CSVs in batch:
+  python3 scripts/plot_cores.py results/cores_uniform_10000.csv results/cores_grid_10000.csv
+
+  # Only generate publication-ready vector PDFs in plots_pdf/ (no top title):
+  python3 scripts/plot_cores.py --pdf
+
+  # Plot all cores_*.csv found in results/:
+  python3 scripts/plot_cores.py --all
 """
     )
-    parser.add_argument("csv_positional", nargs="?", default=None, help="Path to cores CSV file (optional positional argument)")
-    parser.add_argument("--csv", "-c", type=str, default=None, help="Path to cores CSV file (flag argument)")
-    parser.add_argument("--outdir", "-o", type=str, default=None, help="Output directory for plots (default: plots/ or plots_pdf/)")
+    parser.add_argument("csv_files", nargs="*", default=[], help="Path to one or more cores CSV files (positional)")
+    parser.add_argument("--csv", "-c", action="append", default=[], help="Path to cores CSV file (can be repeated or comma-separated)")
+    parser.add_argument("--outdir", "-o", type=str, default=None, help="Output directory for plots (default: plots/ and plots_pdf/)")
     parser.add_argument("--all", "-a", action="store_true", help="Plot all cores CSV files in results/")
     parser.add_argument("--pdf", action="store_true", help="Generate publication-ready PDF plots without titles in plots_pdf/")
+    parser.add_argument("--png", action="store_true", help="Generate PNG plots with titles in plots/")
+    parser.add_argument("--both", action="store_true", help="Explicitly generate both PNG in plots/ and PDF in plots_pdf/")
     parser.add_argument("--no-title", action="store_true", help="Omit figure title (ideal for LaTeX paper captions)")
     parser.add_argument("--format", "-f", type=str, default=None, help="Output format: png, pdf, or png,pdf (comma-separated)")
+    parser.add_argument("--plot-only", action="store_true", help="Compatibility flag for runner script")
 
-    args = parser.parse_args()
-    target_csv = args.csv or args.csv_positional
+    args, unknown = parser.parse_known_args()
+
+    # Collect all targeted CSV files
+    target_csvs = list(args.csv_files)
+    for c_item in args.csv:
+        for p in c_item.split(","):
+            p_clean = p.strip()
+            if p_clean and p_clean not in target_csvs:
+                target_csvs.append(p_clean)
+
+    # Determine execution mode
+    output_dir = None
+    formats = None
+    show_title = None
+    both = args.both
 
     if args.pdf:
-        default_outdir = PLOTS_PDF_DIR
+        output_dir = Path(args.outdir) if args.outdir else PLOTS_PDF_DIR
         formats = ["pdf"]
         show_title = False
-    else:
-        default_outdir = PLOTS_DIR
+    elif args.png:
+        output_dir = Path(args.outdir) if args.outdir else PLOTS_DIR
         formats = ["png"]
         show_title = True
-
-    if args.format:
+    elif args.format:
         formats = [fmt.strip().lower() for fmt in args.format.split(",") if fmt.strip()]
+        if args.outdir:
+            output_dir = Path(args.outdir)
+        else:
+            output_dir = PLOTS_PDF_DIR if formats == ["pdf"] else PLOTS_DIR
+        show_title = False if (formats == ["pdf"] or args.no_title) else True
+    elif args.outdir:
+        output_dir = Path(args.outdir)
+        formats = ["png"]
+        show_title = True
+    else:
+        # Default behavior: generate BOTH PNG in plots/ and PDF in plots_pdf/
+        both = True
 
     if args.no_title:
         show_title = False
 
-    output_dir = Path(args.outdir) if args.outdir else default_outdir
-
-    if target_csv:
-        csv_path = Path(target_csv)
-        plot_cores_file(csv_path, output_dir=output_dir, formats=formats, show_title=show_title)
+    if target_csvs:
+        for target in target_csvs:
+            csv_path = Path(target)
+            plot_cores_file(csv_path, output_dir=output_dir, formats=formats,
+                            show_title=show_title, both=both)
     else:
         csv_files = [f for f in sorted(RESULTS_DIR.glob("cores_*.csv"), key=os.path.getmtime, reverse=True) if not f.name.endswith("_raw.csv")]
         if not csv_files:
@@ -542,12 +691,16 @@ def main():
 
         if args.all:
             for f in csv_files:
-                plot_cores_file(f, output_dir=output_dir, formats=formats, show_title=show_title)
+                plot_cores_file(f, output_dir=output_dir, formats=formats,
+                                show_title=show_title, both=both)
         else:
             print(f"[Cores Plotter] Multiple files found. Plotting latest: {csv_files[0].name}")
-            plot_cores_file(csv_files[0], output_dir=output_dir, formats=formats, show_title=show_title)
+            print(f"               (Tip: use --all to plot all cores CSVs)")
+            plot_cores_file(csv_files[0], output_dir=output_dir, formats=formats,
+                            show_title=show_title, both=both)
 
-    print("\n[Cores Plotter] Done! All plots updated in directory: " + str(output_dir) + "\n")
+    out_summary = str(output_dir) if output_dir else f"{PLOTS_DIR} (PNG) & {PLOTS_PDF_DIR} (PDF)"
+    print(f"\n[Cores Plotter] Done! All plots updated in: {out_summary}\n")
 
 if __name__ == "__main__":
     main()

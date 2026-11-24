@@ -377,8 +377,9 @@ def plot_benchmark_data(df: pd.DataFrame, mesh_type: str = "uniform", seed: int 
         print(f"  [+] Saved Time Logarithmic Plot:   {time_log_path}")
     plt.close(fig)
 
-def plot_file(csv_path: Path, output_dir: Path = PLOTS_DIR, formats: list = None, show_title: bool = True):
-    """Parses a CSV file and triggers plot generation."""
+def plot_file(csv_path: Path, output_dir: Path = None, formats: list = None,
+              show_title: bool = None, both: bool = False):
+    """Parses a CSV file and triggers plot generation (dual PNG + PDF by default)."""
     if not csv_path.exists():
         print(f"[Error] File not found: {csv_path}")
         return False
@@ -422,8 +423,176 @@ def plot_file(csv_path: Path, output_dir: Path = PLOTS_DIR, formats: list = None
         except Exception:
             pass
 
-    plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=output_dir,
-                        seeds_info=seeds_info, runs=runs, formats=formats, show_title=show_title)
+    is_dual = both or (output_dir is None and formats is None and show_title is None)
+    if is_dual:
+        print("[Plotter] Generating standard PNG visualizations in plots/...")
+        plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=PLOTS_DIR,
+                            seeds_info=seeds_info, runs=runs, formats=["png"], show_title=True)
+        print("[Plotter] Generating publication-ready vector PDFs (no title) in plots_pdf/...")
+        plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=PLOTS_PDF_DIR,
+                            seeds_info=seeds_info, runs=runs, formats=["pdf"], show_title=False)
+    else:
+        target_dir = output_dir if output_dir is not None else PLOTS_DIR
+        target_formats = formats if formats is not None else ["png"]
+        target_title = show_title if show_title is not None else True
+        plot_benchmark_data(df, mesh_type=mesh_type, seed=seed, output_dir=target_dir,
+                            seeds_info=seeds_info, runs=runs, formats=target_formats, show_title=target_title)
+    return True
+
+def plot_combined_files(csv_paths: list, output_dir: Path = PLOTS_DIR, formats: list = None,
+                        show_title: bool = True, custom_name: str = None):
+    """Combines multiple CSV files into a unified dataset and plots it."""
+    valid_paths = [p for p in csv_paths if p.exists()]
+    if not valid_paths:
+        print("[Error] No valid CSV files found to combine.")
+        return False
+
+    print(f"\n[Plotter] Combining {len(valid_paths)} CSV files:")
+    dfs = []
+    mesh_types = set()
+    runs = 1
+    seeds = set()
+    for p in valid_paths:
+        print(f"  -> Reading: {p}")
+        try:
+            df = pd.read_csv(p)
+            dfs.append(df)
+            for part in p.stem.split("_"):
+                if part in ["uniform", "grid"]:
+                    mesh_types.add(part)
+                if part.startswith("seed") and not part.startswith("seeds"):
+                    seeds.add(part[4:])
+            if "runs" in df.columns and pd.notnull(df["runs"].iloc[0]):
+                runs = max(runs, int(float(df["runs"].iloc[0])))
+        except Exception as e:
+            print(f"  [Warning] Could not read {p}: {e}")
+
+    if not dfs:
+        return False
+
+    combined = pd.concat(dfs, ignore_index=True)
+    numeric_cols = [c for c in combined.select_dtypes(include=[np.number]).columns if c != "n_vertices"]
+    if "n_vertices" in combined.columns:
+        combined = combined.groupby("n_vertices", as_index=False)[numeric_cols].mean()
+        combined = combined.sort_values(by="n_vertices").reset_index(drop=True)
+
+    tag = custom_name or ("_".join(sorted(mesh_types)) + "_combined" if mesh_types else "combined")
+    seeds_info = ", ".join(sorted(seeds)) if seeds else ""
+    plot_benchmark_data(combined, mesh_type=tag, output_dir=output_dir, formats=formats,
+                        show_title=show_title, runs=runs, seeds_info=seeds_info)
+    return True
+
+def plot_compare_datasets(csv_paths: list, output_dir: Path = PLOTS_DIR, formats: list = None,
+                          show_title: bool = True, custom_name: str = None):
+    """Generates comparison plots contrasting multiple CSV datasets on the same figures."""
+    if formats is None:
+        formats = ["png"]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    valid_paths = [p for p in csv_paths if p.exists()]
+    if len(valid_paths) < 2:
+        print("[Warning] Need at least 2 CSV files to compare.")
+        if len(valid_paths) == 1:
+            return plot_file(valid_paths[0], output_dir=output_dir, formats=formats, show_title=show_title)
+        return False
+
+    datasets = []
+    for p in valid_paths:
+        try:
+            df = pd.read_csv(p).sort_values(by="n_vertices").copy()
+            label = p.stem.replace("sweep_", "")
+            for m in ["uniform", "grid"]:
+                if m in p.stem:
+                    label = m.capitalize()
+                    break
+            datasets.append((label, p.stem, df))
+        except Exception as e:
+            print(f"[Warning] Could not load {p}: {e}")
+
+    if len(datasets) < 2:
+        return False
+
+    print(f"\n[Plotter] Generating multi-dataset comparison for: {[d[0] for d in datasets]}")
+
+    variants = [
+        ("GPolylla", "gpu_time_ms", "#2ca02c", "o"),
+        ("MPolylla DCEL", "omp_dcel_time_ms", "#ff7f0e", "s"),
+        ("MPolylla Data", "omp_data_time_ms", "#1f77b4", "^"),
+        ("MPolylla Task", "omp_tasks_time_ms", "#9467bd", "v"),
+        ("Polylla-Mesh-DCEL", "seq_time_ms", "#7f7f7f", "x"),
+    ]
+    linestyles = ["-", "--", "-.", ":"]
+
+    tag = custom_name or "_vs_".join([d[0].lower() for d in datasets])
+    fig_w, fig_h = (6.2, 5.2) if not show_title else (6.2, 5.6)
+
+    # 1. Comparison Time Logarithmic Plot
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
+    for d_idx, (d_label, _, df) in enumerate(datasets):
+        ls = linestyles[d_idx % len(linestyles)]
+        for v_name, col, color, marker in variants:
+            actual_col = col
+            if col == "omp_data_time_ms" and col not in df.columns:
+                for alt in ["omp_loops_time_ms", "cpu_time_ms"]:
+                    if alt in df.columns: actual_col = alt; break
+            if actual_col in df.columns and (df[actual_col].fillna(0) > 0).any():
+                ax.plot(df["n_vertices"], df[actual_col],
+                        marker=marker, markersize=5.5, color=color, linestyle=ls, linewidth=1.8,
+                        label=f"{v_name} ({d_label})")
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Number of Vertices", fontsize=10.5, fontweight="bold")
+    ax.set_ylabel("Execution Time in ms (Log Scale)", fontsize=10.5, fontweight="bold")
+    format_vertices_axis(ax)
+    ax.tick_params(labelsize=9)
+    if show_title:
+        title_str = " vs ".join([d[0] for d in datasets])
+        ax.set_title(f"Polylla Execution Time Comparison\n({title_str})", fontsize=11, fontweight="bold", pad=10)
+    ax.grid(True, which="both", linestyle="--", alpha=0.6)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8, frameon=True, framealpha=0.95)
+    fig.tight_layout()
+    for fmt in formats:
+        out_p = output_dir / f"comparison_time_log_{tag}.{fmt}"
+        fig.savefig(out_p, bbox_inches="tight", dpi=300)
+        print(f"  [+] Saved Comparison Time Plot:     {out_p}")
+    plt.close(fig)
+
+    # 2. Comparison Speedup Logarithmic Plot
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
+    for d_idx, (d_label, _, df) in enumerate(datasets):
+        ls = linestyles[d_idx % len(linestyles)]
+        seq_col = "seq_time_ms" if "seq_time_ms" in df.columns and (df["seq_time_ms"] > 0).any() else None
+        if not seq_col:
+            continue
+        for v_name, col, color, marker in variants:
+            if v_name == "Polylla-Mesh-DCEL":
+                continue
+            actual_col = col
+            if col == "omp_data_time_ms" and col not in df.columns:
+                for alt in ["omp_loops_time_ms", "cpu_time_ms"]:
+                    if alt in df.columns: actual_col = alt; break
+            if actual_col in df.columns and (df[actual_col].fillna(0) > 0).any():
+                sp = df[seq_col] / df[actual_col]
+                ax.plot(df["n_vertices"], sp,
+                        marker=marker, markersize=5.5, color=color, linestyle=ls, linewidth=1.8,
+                        label=f"{v_name} ({d_label})")
+
+    ax.axhline(1.0, color="#7f7f7f", linestyle=":", linewidth=1.3, label="Baseline (1.0x)")
+    ax.set_yscale("log")
+    ax.set_xlabel("Number of Vertices", fontsize=10.5, fontweight="bold")
+    ax.set_ylabel("Speedup Factor over Baseline (Log Scale)", fontsize=10.5, fontweight="bold")
+    format_vertices_axis(ax)
+    ax.tick_params(labelsize=9)
+    if show_title:
+        title_str = " vs ".join([d[0] for d in datasets])
+        ax.set_title(f"Polylla Speedup Comparison vs Baseline\n({title_str})", fontsize=11, fontweight="bold", pad=10)
+    ax.grid(True, which="both", linestyle="--", alpha=0.6)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8, frameon=True, framealpha=0.95)
+    fig.tight_layout()
+    for fmt in formats:
+        out_p = output_dir / f"comparison_speedup_log_{tag}.{fmt}"
+        fig.savefig(out_p, bbox_inches="tight", dpi=300)
+        print(f"  [+] Saved Comparison Speedup Plot:  {out_p}")
+    plt.close(fig)
     return True
 
 def main():
@@ -431,45 +600,81 @@ def main():
         description="Standalone Plotting Tool for PPolylla Benchmark Results",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python3 scripts/plot.py                               # Automatically plots the latest sweep_*.csv (PNG with title in plots/)
+  python3 scripts/plot.py                               # Automatically plots the latest sweep_*.csv (PNG in plots/)
+  python3 scripts/plot.py results/sweep_uniform.csv     # Plots a single CSV directly
+  python3 scripts/plot.py file1.csv file2.csv           # Plots multiple CSVs in batch (separate plots for each)
+  python3 scripts/plot.py file1.csv file2.csv --combine # Combines/merges multiple CSVs into a single continuous plot
+  python3 scripts/plot.py file1.csv file2.csv --compare # Compares multiple CSVs on the same figure (e.g. Uniform vs Grid)
   python3 scripts/plot.py --all                         # Plots all sweep_*.csv found in results/
   python3 scripts/plot.py --pdf --all                   # Plots all sweep_*.csv as vector PDFs without title in plots_pdf/
-  python3 scripts/plot.py results/sweep_uniform_seed42.csv
-  python3 scripts/plot.py --csv results/sweep_uniform_seed42.csv --outdir custom_plots/
 """
     )
-    parser.add_argument("csv_positional", nargs="?", default=None, help="Path to CSV file (optional positional argument)")
-    parser.add_argument("--csv", "-c", type=str, default=None, help="Path to CSV file (flag argument)")
+    parser.add_argument("csv_files", nargs="*", default=[], help="Path to one or more CSV files")
+    parser.add_argument("--csv", "-c", action="append", default=[], help="Path to CSV file (can be repeated or comma-separated)")
     parser.add_argument("--outdir", "-o", type=str, default=None, help="Output directory for plots (default: plots/ or plots_pdf/)")
     parser.add_argument("--all", "-a", action="store_true", help="Plot all sweep CSV files in results/")
+    parser.add_argument("--combine", "--merge", action="store_true", help="Merge multiple CSV files into a single unified dataset and plot it")
+    parser.add_argument("--compare", action="store_true", help="Compare multiple CSV files on the same figure")
+    parser.add_argument("--name", type=str, default=None, help="Custom tag/name for combined or comparison output files")
     parser.add_argument("--pdf", action="store_true", help="Generate publication-ready PDF plots without titles in plots_pdf/")
+    parser.add_argument("--png", action="store_true", help="Generate PNG plots with titles in plots/")
+    parser.add_argument("--both", action="store_true", help="Explicitly generate both PNG in plots/ and PDF in plots_pdf/")
     parser.add_argument("--no-title", action="store_true", help="Omit figure title (ideal for LaTeX paper captions)")
     parser.add_argument("--format", "-f", type=str, default=None, help="Output format: png, pdf, or png,pdf (comma-separated)")
     parser.add_argument("--plot-only", action="store_true", help="Compatibility flag for runner script")
 
     args, unknown = parser.parse_known_args()
-    target_csv = args.csv or args.csv_positional
+
+    # Collect all targeted CSV files
+    target_csvs = list(args.csv_files)
+    for c_item in args.csv:
+        for p in c_item.split(","):
+            p_clean = p.strip()
+            if p_clean and p_clean not in target_csvs:
+                target_csvs.append(p_clean)
+
+    output_dir = None
+    formats = None
+    show_title = None
+    both = args.both
 
     if args.pdf:
-        default_outdir = PLOTS_PDF_DIR
+        output_dir = Path(args.outdir) if args.outdir else PLOTS_PDF_DIR
         formats = ["pdf"]
         show_title = False
-    else:
-        default_outdir = PLOTS_DIR
+    elif args.png:
+        output_dir = Path(args.outdir) if args.outdir else PLOTS_DIR
         formats = ["png"]
         show_title = True
-
-    if args.format:
+    elif args.format:
         formats = [fmt.strip().lower() for fmt in args.format.split(",") if fmt.strip()]
+        if args.outdir:
+            output_dir = Path(args.outdir)
+        else:
+            output_dir = PLOTS_PDF_DIR if formats == ["pdf"] else PLOTS_DIR
+        show_title = False if (formats == ["pdf"] or args.no_title) else True
+    elif args.outdir:
+        output_dir = Path(args.outdir)
+        formats = ["png"]
+        show_title = True
+    else:
+        # Default behavior: generate BOTH PNG in plots/ and PDF in plots_pdf/
+        both = True
 
     if args.no_title:
         show_title = False
 
-    output_dir = Path(args.outdir) if args.outdir else default_outdir
-
-    if target_csv:
-        csv_path = Path(target_csv)
-        plot_file(csv_path, output_dir=output_dir, formats=formats, show_title=show_title)
+    if target_csvs:
+        csv_paths = [Path(p) for p in target_csvs]
+        if args.combine:
+            plot_combined_files(csv_paths, output_dir=output_dir, formats=formats,
+                                show_title=show_title, custom_name=args.name, both=both)
+        elif args.compare:
+            plot_compare_datasets(csv_paths, output_dir=output_dir, formats=formats,
+                                  show_title=show_title, custom_name=args.name, both=both)
+        else:
+            for p in csv_paths:
+                plot_file(p, output_dir=output_dir, formats=formats, show_title=show_title, both=both)
     else:
         # Scan results directory for sweep CSVs (excluding raw unaggregated dumps)
         candidate_files = [f for f in RESULTS_DIR.glob("sweep_*.csv") if not f.name.endswith("_raw.csv")]
@@ -482,7 +687,13 @@ def main():
             print("  ./run_benchmark.sh --sweep --type uniform --sizes 10000,50000,100000")
             sys.exit(1)
 
-        if args.all:
+        if args.combine:
+            plot_combined_files(candidate_files, output_dir=output_dir, formats=formats,
+                                show_title=show_title, custom_name=args.name, both=both)
+        elif args.compare:
+            plot_compare_datasets(candidate_files, output_dir=output_dir, formats=formats,
+                                  show_title=show_title, custom_name=args.name, both=both)
+        elif args.all:
             # Group candidate files by mesh type to select the best canonical dataset per type
             mesh_types = set()
             for f in candidate_files:
@@ -505,14 +716,15 @@ def main():
                 selected_files = sorted(candidate_files, key=os.path.getmtime, reverse=True)
 
             for f in selected_files:
-                plot_file(f, output_dir=output_dir, formats=formats, show_title=show_title)
+                plot_file(f, output_dir=output_dir, formats=formats, show_title=show_title, both=both)
         else:
             sorted_files = sorted(candidate_files, key=os.path.getmtime, reverse=True)
             print(f"[Plotter] Multiple CSVs found. Plotting latest: {sorted_files[0].name}")
-            print(f"         (Tip: use --all to plot all mesh types)")
-            plot_file(sorted_files[0], output_dir=output_dir, formats=formats, show_title=show_title)
+            print(f"         (Tip: use --all to plot all, or --compare to contrast them)")
+            plot_file(sorted_files[0], output_dir=output_dir, formats=formats, show_title=show_title, both=both)
 
-    print("\n[Plotter] Done! All plots updated in directory: " + str(output_dir) + "\n")
+    out_summary = str(output_dir) if output_dir else f"{PLOTS_DIR} (PNG) & {PLOTS_PDF_DIR} (PDF)"
+    print(f"\n[Plotter] Done! All plots updated in: {out_summary}\n")
 
 if __name__ == "__main__":
     main()
